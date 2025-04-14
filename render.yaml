@@ -5,7 +5,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn run:app
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true  # 自动生成随机密钥
@@ -24,4 +24,8 @@ services:
       - key: REDIS_PASSWORD
         sync: false  # 需要手动设置
       - key: REDIS_SSL
-        value: "True" 
+        value: "True"
+      - key: ADMIN_USERNAME
+        value: "admin"  # 默认管理员用户名
+      - key: DATABASE_URL
+        sync: false  # 需要手动设置数据库连接URL 
