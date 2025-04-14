@@ -1,0 +1,81 @@
+{% extends "shared/base.html" %}
+
+{% block title %}时间提醒助手 - 用户管理{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">用户管理</h4>
+                </div>
+                <div class="card-body">
+                    {% include 'shared/flash.html' %}
+
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>用户名</th>
+                                    <th>创建时间</th>
+                                    <th>管理员权限</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for user in users %}
+                                <tr>
+                                    <td>{{ user.username }}</td>
+                                    <td>
+                                        {% if user.created_at %}
+                                            {{ user.created_at|replace('T', ' ')|replace('Z', '') }}
+                                        {% else %}
+                                            未知
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if user.is_admin %}
+                                            <span class="badge bg-success">是</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">否</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group">
+                                            {% if user.is_admin %}
+                                                <form action="{{ url_for('system.set_admin', username=user.username, is_admin=0) }}" method="post">
+                                                    <button type="submit" class="btn btn-sm btn-warning">取消管理员</button>
+                                                </form>
+                                            {% else %}
+                                                <form action="{{ url_for('system.set_admin', username=user.username, is_admin=1) }}" method="post">
+                                                    <button type="submit" class="btn btn-sm btn-info">设为管理员</button>
+                                                </form>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="alert alert-info mt-3">
+                        <h5>注意事项：</h5>
+                        <ul>
+                            <li>管理员可以访问系统所有功能，包括管理所有用户的任务和通知账号</li>
+                            <li>请谨慎分配管理员权限</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="card-footer text-muted text-end">
+                    <small>
+                        当前时间: {{ now }} | 
+                        Redis状态: {% if redis_connected %}<span class="text-success">已连接</span>{% else %}<span class="text-danger">未连接</span>{% endif %}
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

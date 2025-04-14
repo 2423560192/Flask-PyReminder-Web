@@ -81,44 +81,50 @@ class User(Base):
 
     @classmethod
     def verify_user(cls, username, password):
-        """验证用户凭据"""
-        # 管理员账户验证（固定在配置中）
-        if username == config.ADMIN_USERNAME:
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
-            return password_hash == config.ADMIN_PASSWORD_HASH, True
-
-        # 普通用户验证
+        """验证用户凭据
+        
+        Args:
+            username (str): 用户名
+            password (str): 密码
+            
+        Returns:
+            tuple: (是否验证通过, 是否为管理员)
+        """
+        # 密码加密
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-
-        # 获取Redis连接
+        
+        # 1. 首先尝试从Redis获取用户信息
         redis = redis_helper.get_client()
         if redis:
-            # 从Redis获取用户
             user_json = redis.hget(USERS_KEY, username)
-            if not user_json:
-                return False, False
-
-            user_data = json.loads(user_json)
-            return password_hash == user_data['password_hash'], user_data.get('is_admin', False)
-
-        # 从数据库获取用户
-        session = get_db_session()
-        if session:
+            if user_json:
+                try:
+                    user_data = json.loads(user_json)
+                    if password_hash == user_data.get('password_hash', ''):
+                        return True, user_data.get('is_admin', False)
+                except Exception as e:
+                    print(f"解析用户数据出错: {str(e)}")
+        
+        # 2. 如果Redis查询失败，尝试从数据库获取
+        db_session = get_db_session()
+        if db_session:
             try:
-                user = session.query(cls).filter_by(username=username).first()
-                if not user:
-                    return False, False
-
-                return password_hash == user.password_hash, user.is_admin
+                user = db_session.query(cls).filter_by(username=username).first()
+                if user and password_hash == user.password_hash:
+                    return True, user.is_admin
+            except Exception as e:
+                print(f"从数据库验证用户时出错: {str(e)}")
             finally:
-                close_db_session(session)
-
-        # 从内存获取用户
-        if username not in memory_users:
-            return False, False
-
-        user_data = memory_users[username]
-        return password_hash == user_data['password_hash'], user_data.get('is_admin', False)
+                close_db_session(db_session)
+        
+        # 3. 最后尝试从内存缓存获取
+        if username in memory_users:
+            user_data = memory_users.get(username, {})
+            if password_hash == user_data.get('password_hash', ''):
+                return True, user_data.get('is_admin', False)
+        
+        # 验证失败
+        return False, False
 
     @classmethod
     def update_user(cls, username, data):
@@ -393,3 +399,87 @@ class User(Base):
             return False
         finally:
             close_db_session(db_session)
+
+    @classmethod
+    def set_admin(cls, username, is_admin=True):
+        """设置或取消用户的管理员权限
+        
+        Args:
+            username (str): 用户名
+            is_admin (bool): 是否为管理员，True为设置，False为取消
+            
+        Returns:
+            bool: 操作是否成功
+        """
+        return cls.update_user(username, {'is_admin': is_admin})
+
+    @classmethod
+    def ensure_admin(cls):
+        """确保系统中至少有一个管理员账户
+        如果没有管理员账户，则尝试将环境变量中的ADMIN_USERNAME设为管理员，
+        如果该用户不存在，则创建一个新管理员账户
+        
+        Returns:
+            bool: 是否成功确保管理员存在
+        """
+        print("检查系统管理员账户...")
+        
+        # 检查是否有管理员
+        has_admin = False
+        
+        # 1. 从Redis检查
+        redis = redis_helper.get_client()
+        if redis:
+            all_users = redis.hgetall(USERS_KEY)
+            for username, user_json in all_users.items():
+                try:
+                    user_data = json.loads(user_json)
+                    if user_data.get('is_admin', False):
+                        has_admin = True
+                        print(f"找到现有管理员: {username.decode('utf-8') if isinstance(username, bytes) else username}")
+                        break
+                except Exception as e:
+                    print(f"解析用户数据出错: {str(e)}")
+                    continue
+        
+        # 2. 如果Redis没有找到管理员，从数据库检查
+        if not has_admin:
+            db_session = get_db_session()
+            if db_session:
+                try:
+                    admin_count = db_session.query(cls).filter_by(is_admin=True).count()
+                    has_admin = admin_count > 0
+                    if has_admin:
+                        print("数据库中已存在管理员账户")
+                except Exception as e:
+                    print(f"查询管理员时出错: {str(e)}")
+                finally:
+                    close_db_session(db_session)
+        
+        # 3. 如果没有管理员，创建一个
+        if not has_admin:
+            print("系统中没有管理员账户，尝试创建...")
+            
+            # 尝试将环境变量中的ADMIN_USERNAME设为管理员
+            admin_username = config.ADMIN_USERNAME
+            
+            # 检查用户是否存在
+            user = cls.get_user(admin_username)
+            
+            if user:
+                # 用户存在，设为管理员
+                print(f"找到用户 {admin_username}，将其设为管理员")
+                return cls.set_admin(admin_username, True)
+            else:
+                # 用户不存在，创建一个新管理员
+                admin_password = 'Admin@' + hashlib.md5(str(datetime.datetime.now().timestamp()).encode()).hexdigest()[:6]  # 生成随机密码
+                print(f"创建默认管理员账户: {admin_username}")
+                success = cls.create_user(admin_username, admin_password, True)
+                if success:
+                    print(f"已创建默认管理员账户 {admin_username}，默认密码: {admin_password}")
+                    return True
+                else:
+                    print("创建管理员账户失败")
+                    return False
+        
+        return has_admin

@@ -6,6 +6,7 @@ from app.utils.db import setup_database, close_db_session
 from app.controllers.task_controller import TaskChecker
 from app.utils.sync_manager import SyncManager
 from app.config import get_config
+from app.models.user import User
 
 # 记录程序启动时间
 STARTUP_TIME = datetime.datetime.now()
@@ -41,6 +42,7 @@ def create_app():
     # 初始化应用状态
     app.config['TASK_CHECKER_STARTED'] = False
     app.config['SYNC_MANAGER_STARTED'] = False
+    app.config['ADMIN_CHECKED'] = False
 
     # 注册蓝图
     app.register_blueprint(main_bp)
@@ -63,6 +65,12 @@ def create_app():
     # 初始化同步管理器和任务检查器（仅在主进程中执行，且确保只执行一次）
     if (not app.debug or (app.debug and os.environ.get('WERKZEUG_RUN_MAIN') == 'true')) and not app.config['TASK_CHECKER_STARTED'] and not app.config['SYNC_MANAGER_STARTED']:
         with app.app_context():
+            # 确保系统中至少有一个管理员账户
+            if not app.config['ADMIN_CHECKED']:
+                User.ensure_admin()
+                app.config['ADMIN_CHECKED'] = True
+                print("已完成管理员账户检查")
+                
             # 初始化同步管理器
             sync_manager = SyncManager()
             sync_manager.start(app)
