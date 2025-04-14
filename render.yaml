@@ -15,12 +15,14 @@ services:
         sync: false  # 允许手动设置
       - key: TIMEZONE
         value: "Asia/Shanghai"  # 使用中国时区
-      - key: REDIS_DB
-        value: "0"
+      - key: REDIS_URL
+        sync: false  # 需要手动设置完整的Redis URL
       - key: REDIS_HOST
-        value: "amused-bream-11167.upstash.io"
+        sync: false  # 手动设置Redis主机
       - key: REDIS_PORT
         value: "6379"
+      - key: REDIS_DB
+        value: "0"
       - key: REDIS_PASSWORD
         sync: false  # 需要手动设置
       - key: REDIS_SSL

@@ -2,6 +2,7 @@ import redis
 import traceback
 from flask import g, current_app, has_app_context, has_request_context
 from app.config import get_config
+import os
 
 config = get_config()
 
@@ -23,12 +24,20 @@ class RedisHelper:
             return  # 已初始化，跳过
             
         try:
-            print(f"正在初始化Redis连接池... URL配置: {bool(config.REDIS_URL)}, 主机: {config.REDIS_HOST}, 端口: {config.REDIS_PORT}")
-            if config.REDIS_URL:
-                print(f"使用URL初始化Redis连接池: {config.REDIS_URL}")
+            # 检查环境变量中是否有完整的Redis URL（Render环境中可能作为单一变量提供）
+            redis_url = os.environ.get('REDIS_URL', config.REDIS_URL)
+            redis_ssl = os.environ.get('REDIS_SSL', config.REDIS_SSL)
+            redis_ssl = redis_ssl if isinstance(redis_ssl, bool) else redis_ssl.lower() in ['true', '1', 'yes']
+            
+            print(f"正在初始化Redis连接池... URL配置: {bool(redis_url)}, 主机: {config.REDIS_HOST}, 端口: {config.REDIS_PORT}, SSL: {redis_ssl}")
+            
+            if redis_url:
+                print(f"使用URL初始化Redis连接池: {redis_url[:20]}...")  # 只打印URL前20个字符，避免泄露密码
                 self.pool = redis.ConnectionPool.from_url(
-                    config.REDIS_URL,
-                    decode_responses=True
+                    redis_url,
+                    decode_responses=True,
+                    ssl=redis_ssl,
+                    ssl_cert_reqs=None  # 不验证SSL证书
                 )
             else:
                 print(f"使用主机和端口初始化Redis连接池: {config.REDIS_HOST}:{config.REDIS_PORT}")
@@ -37,13 +46,19 @@ class RedisHelper:
                     port=config.REDIS_PORT,
                     db=config.REDIS_DB,
                     password=config.REDIS_PASSWORD,
-                    decode_responses=True
+                    decode_responses=True,
+                    ssl=redis_ssl,
+                    ssl_cert_reqs=None  # 不验证SSL证书
                 )
                 
             # 测试连接
             test_client = redis.Redis(connection_pool=self.pool)
             test_client.ping()
             print(f"Redis连接池创建成功 (数据库: {config.REDIS_DB})")
+            
+            # 打印使用的键名
+            print(f"使用的Redis键名: TASKS_KEY={config.TASKS_KEY}, TASK_ID_KEY={config.TASK_ID_KEY}")
+            print(f"用户任务键名: USER_TASKS_KEY={config.USER_TASKS_KEY}, PENDING_TASKS_KEY={config.PENDING_TASKS_KEY}")
         except Exception as e:
             print(f"Redis连接池创建失败: {str(e)}")
             print("Redis错误详情:")
