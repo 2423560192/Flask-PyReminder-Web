@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的通知账号 - 时间提醒助手</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('main.index') }}">时间提醒助手</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.index') }}">
+                            <i class="bi bi-house"></i> 首页
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('token.user_tokens') }}">
+                            <i class="bi bi-bell"></i> 我的通知账号
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">退出登录</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <!-- Flash消息 -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-primary text-white">
+                        <h3 class="card-title mb-0">我的通知账号</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="tokenForm" action="{{ url_for('token.add_token') }}" method="post" class="mb-4">
+                            <div class="row g-3">
+                                <div class="col-md-5">
+                                    <label for="token_name" class="form-label">账号名称</label>
+                                    <input type="text" class="form-control" id="token_name" name="token_name" 
+                                           placeholder="例如：{{ username }}" value="{{ username }}" required>
+                                    <div class="form-text">建议使用自己的用户名作为账号名称</div>
+                                </div>
+                                <div class="col-md-7">
+                                    <label for="token_value" class="form-label">息知令牌</label>
+                                    <input type="text" class="form-control" id="token_value" name="token_value" 
+                                           placeholder="XZ开头的令牌" required pattern="XZ[a-zA-Z0-9]{30,}">
+                                    <div class="form-text">
+                                        息知令牌通常以XZ开头，
+                                        <a href="https://xz.qqoq.net/" target="_blank">点此获取 <i class="bi bi-box-arrow-up-right"></i></a>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <button type="submit" class="btn btn-primary">添加通知账号</button>
+                                </div>
+                            </div>
+                        </form>
+
+                        <hr>
+
+                        <!-- 息知使用说明 -->
+                        <div class="alert alert-info" role="alert">
+                            <h5 class="alert-heading"><i class="bi bi-info-circle"></i> 息知令牌获取方法</h5>
+                            <p>息知（Xi Zhi）是一个简单易用的消息推送服务，可以将消息推送到您的手机。请按以下步骤获取令牌：</p>
+                            <ol>
+                                <li>访问<a href="https://xz.qqoq.net/" target="_blank">息知官网</a>并使用微信扫码登录</li>
+                                <li>登录后在左侧菜单点击"单点推送"</li>
+                                <li>页面上会显示"XZ"开头的令牌，复制后粘贴到上方表单中</li>
+                                <li>添加成功后，当任务提醒时间到达，系统会自动通过息知将消息推送到您的手机</li>
+                            </ol>
+                        </div>
+
+                        <!-- 令牌列表 -->
+                        <div class="card mt-4">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0">已配置账号列表 <span class="badge bg-primary">{{ token_count }}</span></h5>
+                            </div>
+                            <div class="card-body">
+                                {% if tokens %}
+                                    <div class="table-responsive">
+                                        <table class="table table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>账号名称</th>
+                                                    <th>令牌值</th>
+                                                    <th width="120">操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for name, value in tokens.items() %}
+                                                <tr>
+                                                    <td>{{ name }}</td>
+                                                    <td>
+                                                        <div class="input-group">
+                                                            <input type="text" class="form-control token-value" value="{{ value }}" readonly>
+                                                            <button class="btn btn-outline-secondary copy-btn" type="button" data-value="{{ value }}">
+                                                                <i class="bi bi-clipboard"></i>
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <form action="{{ url_for('token.delete_token', token_name=name) }}" method="post" style="display: inline;">
+                                                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('确定要删除账号 {{ name }} 吗？')">
+                                                                <i class="bi bi-trash"></i> 删除
+                                                            </button>
+                                                        </form>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                {% else %}
+                                    <div class="alert alert-warning">
+                                        <i class="bi bi-exclamation-triangle"></i> 您还没有配置任何通知账号，请添加一个新的通知账号。
+                                    </div>
+                                    <div class="alert alert-info">
+                                        <strong>提示:</strong> 请确保填写正确的息知令牌，格式以XZ开头。通知账号名称可以自定义，便于您识别不同用途的通知。
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12 text-center">
+                <a href="{{ url_for('main.index') }}" class="btn btn-secondary">
+                    <i class="bi bi-arrow-left"></i> 返回首页
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-light py-3 mt-4">
+        <div class="container text-center">
+            <p class="mb-1">时间提醒助手 &copy; {{ now.year if now else '2023' }}. 版权所有.</p>
+            <p class="text-muted mb-0 small">当前时间: {{ now.strftime('%Y-%m-%d %H:%M:%S') if now else '未知' }}</p>
+            <p class="text-muted mb-0 small">
+                {% if redis_connected %}
+                <span class="badge bg-success">数据持久化已启用</span>
+                {% else %}
+                <span class="badge bg-warning text-dark">内存存储模式</span> 应用重启后数据可能丢失
+                {% endif %}
+            </p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 复制令牌到剪贴板
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.copy-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const value = this.getAttribute('data-value');
+                    navigator.clipboard.writeText(value).then(() => {
+                        // 更改按钮文本并恢复
+                        const originalHTML = this.innerHTML;
+                        this.innerHTML = '<i class="bi bi-check"></i>';
+                        setTimeout(() => {
+                            this.innerHTML = originalHTML;
+                        }, 2000);
+                    });
+                });
+            });
+        });
+    </script>
+</body>
+</html> 

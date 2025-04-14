@@ -1,0 +1,215 @@
+{% extends "shared/base.html" %}
+
+{% block title %}时间提醒助手 - 首页{% endblock %}
+
+{% block styles %}
+<style>
+    .task-list {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    .task-item {
+        transition: all 0.3s;
+    }
+    .task-item:hover {
+        transform: translateY(-2px);
+    }
+    .task-date {
+        font-size: 0.9rem;
+    }
+    .no-tasks {
+        padding: 40px 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-4 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> 添加新提醒任务</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('task.add_task') }}">
+                    <div class="mb-3">
+                        <label for="title" class="form-label">任务标题</label>
+                        <input type="text" class="form-control" id="title" name="title" placeholder="输入任务标题" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="content" class="form-label">任务内容</label>
+                        <textarea class="form-control" id="content" name="content" rows="3" placeholder="输入任务详细内容"></textarea>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label for="date" class="form-label">日期</label>
+                            <input type="date" class="form-control" id="date" name="date" required>
+                        </div>
+                        <div class="col">
+                            <label for="time" class="form-label">时间</label>
+                            <input type="time" class="form-control" id="time" name="time" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="token_name" class="form-label">通知账号</label>
+                        <select class="form-select" id="token_name" name="token_name">
+                            {% for token_name in tokens %}
+                            <option value="{{ token_name }}">{{ token_name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">选择用于发送通知的账号</div>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle"></i> 添加提醒任务</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-list-task"></i> 提醒任务列表</h5>
+                <button class="btn btn-sm btn-light" id="refreshTasksBtn"><i class="bi bi-arrow-repeat"></i> 刷新</button>
+            </div>
+            <div class="card-body task-list" id="taskList">
+                {% if tasks %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>任务标题</th>
+                                <th>提醒时间</th>
+                                <th>通知账号</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in tasks %}
+                            <tr class="task-item">
+                                <td>
+                                    <strong>{{ task.title }}</strong>
+                                    {% if task.content %}
+                                    <p class="text-muted small mb-0">{{ task.content }}</p>
+                                    {% endif %}
+                                </td>
+                                <td class="task-date">{{ task.datetime|format_datetime }}</td>
+                                <td><span class="badge bg-info">{{ task.token_name }}</span></td>
+                                <td>
+                                    {% if task.triggered %}
+                                    <span class="badge bg-success">已触发</span>
+                                    {% else %}
+                                    <span class="badge bg-warning">待触发</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <form method="post" action="{{ url_for('task.delete_task', task_id=task.id) }}" onsubmit="return confirm('确定要删除这个任务吗？');">
+                                        <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center no-tasks">
+                    <i class="bi bi-calendar-x" style="font-size: 48px; color: #ccc;"></i>
+                    <p class="lead mt-3 text-muted">您还没有添加任何提醒任务</p>
+                    <p class="text-muted">使用左侧表单添加新的提醒任务</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 初始化日期选择器
+        flatpickr("#date", {
+            locale: "zh",
+            dateFormat: "Y-m-d",
+            defaultDate: "today"
+        });
+        
+        // 初始化时间选择器
+        flatpickr("#time", {
+            locale: "zh",
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: "H:i",
+            time_24hr: true,
+            defaultDate: new Date(new Date().setHours(new Date().getHours() + 1, 0, 0))
+        });
+        
+        // 刷新任务列表
+        document.getElementById('refreshTasksBtn').addEventListener('click', function() {
+            fetch('{{ url_for("task.get_tasks") }}')
+                .then(response => response.json())
+                .then(tasks => {
+                    const taskList = document.getElementById('taskList');
+                    if (tasks.length === 0) {
+                        taskList.innerHTML = `
+                            <div class="text-center no-tasks">
+                                <i class="bi bi-calendar-x" style="font-size: 48px; color: #ccc;"></i>
+                                <p class="lead mt-3 text-muted">您还没有添加任何提醒任务</p>
+                                <p class="text-muted">使用左侧表单添加新的提醒任务</p>
+                            </div>
+                        `;
+                    } else {
+                        let tableHtml = `
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>任务标题</th>
+                                            <th>提醒时间</th>
+                                            <th>通知账号</th>
+                                            <th>状态</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                        `;
+                        
+                        tasks.forEach(task => {
+                            tableHtml += `
+                                <tr class="task-item">
+                                    <td>
+                                        <strong>${task.title}</strong>
+                                        ${task.content ? `<p class="text-muted small mb-0">${task.content}</p>` : ''}
+                                    </td>
+                                    <td class="task-date">${task.datetime}</td>
+                                    <td><span class="badge bg-info">${task.token_name}</span></td>
+                                    <td>
+                                        ${task.triggered 
+                                            ? '<span class="badge bg-success">已触发</span>' 
+                                            : '<span class="badge bg-warning">待触发</span>'}
+                                    </td>
+                                    <td>
+                                        <form method="post" action="{{ url_for('task.delete_task', task_id=0) }}".replace('0', task.id) onsubmit="return confirm('确定要删除这个任务吗？');">
+                                            <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            `;
+                        });
+                        
+                        tableHtml += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        `;
+                        
+                        taskList.innerHTML = tableHtml;
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        });
+    });
+</script>
+{% endblock %} 
