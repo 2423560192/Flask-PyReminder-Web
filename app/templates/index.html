@@ -37,6 +37,33 @@
     #datetime-addon {
         cursor: pointer;
     }
+    .flatpickr-presets {
+        margin-bottom: 0.5rem;
+    }
+    .flatpickr-presets button {
+        font-size: 0.8rem;
+        padding: 0.25rem 0.5rem;
+        margin-right: 0.3rem;
+        margin-bottom: 0.3rem;
+    }
+    /* 修复Flatpickr时间输入框问题 */
+    .numInput.flatpickr-hour, .numInput.flatpickr-minute {
+        font-weight: bold;
+        color: #333;
+        -webkit-appearance: none; /* 去除原生样式 */
+        -moz-appearance: textfield; /* 去除原生样式 */
+        border: none;
+        background-color: transparent;
+    }
+    .numInput.flatpickr-hour:focus, .numInput.flatpickr-minute:focus {
+        outline: none;
+    }
+    /* 去除输入框上下箭头 */
+    .numInput::-webkit-outer-spin-button,
+    .numInput::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
 </style>
 {% endblock %}
 
@@ -66,7 +93,7 @@
                                     <i class="bi bi-calendar-event"></i>
                                 </span>
                             </div>
-                            <div class="form-text">格式: 年-月-日 时:分 (24小时制)</div>
+                            <div class="form-text">选择下方快捷时间或手动设置 (年-月-日 时:分)</div>
                         </div>
                     </div>
                     <div class="mb-3">
@@ -150,8 +177,132 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/zh.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // 给表单添加id
+        const taskForm = document.querySelector('form[action="{{ url_for("task.add_task") }}"]');
+        if (taskForm) {
+            taskForm.id = 'taskForm';
+            
+            // 为表单添加提交事件处理
+            taskForm.addEventListener('submit', function(e) {
+                // 确保日期时间格式正确
+                const datetimeInput = document.getElementById('datetime');
+                if (datetimeInput && datetimeInput.value) {
+                    // 验证日期时间格式
+                    const dateRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+                    if (!dateRegex.test(datetimeInput.value)) {
+                        e.preventDefault();
+                        alert('请使用正确的日期时间格式：YYYY-MM-DD HH:MM');
+                        return false;
+                    }
+                }
+                
+                // 禁用所有flatpickr内部的输入框，防止它们被提交
+                document.querySelectorAll('.flatpickr-hour, .flatpickr-minute, .flatpickr-am-pm').forEach(input => {
+                    input.disabled = true;
+                });
+                
+                // 允许表单提交
+                return true;
+            });
+        }
+
+        // 常用时间选择预设
+        const presets = [
+            { label: '15分钟后', fn: () => { 
+                const date = new Date();
+                date.setMinutes(date.getMinutes() + 15);
+                return date;
+            }},
+            { label: '30分钟后', fn: () => { 
+                const date = new Date();
+                date.setMinutes(date.getMinutes() + 30);
+                return date;
+            }},
+            { label: '1小时后', fn: () => { 
+                const date = new Date();
+                date.setHours(date.getHours() + 1);
+                return date;
+            }},
+            { label: '今天中午', fn: () => {
+                const date = new Date();
+                date.setHours(12, 0, 0, 0);
+                if (date < new Date()) {
+                    // 如果已经过了中午，设置为明天中午
+                    date.setDate(date.getDate() + 1);
+                }
+                return date;
+            }},
+            { label: '今晚 8点', fn: () => {
+                const date = new Date();
+                date.setHours(20, 0, 0, 0);
+                if (date < new Date()) {
+                    // 如果已经过了晚上8点，设置为明天晚上8点
+                    date.setDate(date.getDate() + 1);
+                }
+                return date;
+            }},
+            { label: '明天早上9点', fn: () => {
+                const date = new Date();
+                date.setDate(date.getDate() + 1);
+                date.setHours(9, 0, 0, 0);
+                return date;
+            }},
+            { label: '后天早上9点', fn: () => {
+                const date = new Date();
+                date.setDate(date.getDate() + 2);
+                date.setHours(9, 0, 0, 0);
+                return date;
+            }},
+            { label: '周末上午', fn: () => {
+                const date = new Date();
+                // 获取当前日期是周几 (0-6, 0是周日)
+                const day = date.getDay();
+                // 计算距离下一个周六的天数
+                const daysUntilWeekend = (day === 0 || day === 6) ? 
+                    (day === 0 ? 6 : 5) : // 如果今天是周日，设置为下周六；如果是周六，设置为下周五
+                    (6 - day); // 否则计算到本周六的天数
+                date.setDate(date.getDate() + daysUntilWeekend);
+                date.setHours(10, 0, 0, 0);
+                return date;
+            }},
+            { label: '下周一早上', fn: () => {
+                const date = new Date();
+                // 获取当前日期是周几 (0-6, 0是周日)
+                const day = date.getDay();
+                // 计算距离下周一的天数
+                const daysUntilNextMonday = (day === 0) ? 1 : (8 - day);
+                date.setDate(date.getDate() + daysUntilNextMonday);
+                date.setHours(9, 0, 0, 0);
+                return date;
+            }}
+        ];
+        
         // 初始化日期时间选择器
         const datetimeInput = document.getElementById('datetime');
+        if (!datetimeInput) return; // 安全检查
+        
+        // 创建一个UI友好的预设容器
+        const presetsContainer = document.createElement("div");
+        presetsContainer.className = "flatpickr-presets mb-2 d-flex flex-wrap";
+        datetimeInput.parentNode.insertBefore(presetsContainer, datetimeInput);
+        
+        // 添加所有预设按钮
+        presets.forEach(preset => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "btn btn-sm btn-outline-primary me-1 mb-1";
+            btn.textContent = preset.label;
+            btn.addEventListener("click", function() {
+                const date = preset.fn();
+                datetimePicker.setDate(date);
+                
+                // 确保焦点回到输入框，使用户可以继续编辑
+                setTimeout(() => datetimeInput.focus(), 100);
+            });
+            presetsContainer.appendChild(btn);
+        });
+        
+        // 初始化Flatpickr
         const datetimePicker = flatpickr(datetimeInput, {
             locale: "zh",
             enableTime: true,
@@ -160,31 +311,70 @@
             minuteIncrement: 5,
             defaultDate: new Date(new Date().setHours(new Date().getHours() + 1, 0, 0)),
             allowInput: true,
-            // 添加一些额外的配置，使其更易用
-            disableMobile: false, // 在移动设备上使用更好的原生选择器
+            disableMobile: true, // 在移动设备上也使用自定义选择器，避免问题
             static: true,  // 防止日历被其他元素遮挡
             position: "auto", // 自动选择最佳位置
             
-            // 解决分钟输入框没有name属性的问题
+            // 可选：使用替代时间输入方法（只用一个时间选择器）
+            /*
+            enableSeconds: false, // 不启用秒选择
+            noCalendar: false,    // 显示日历
+            */
+            
+            // 解决分钟输入框的问题
             onReady: function(selectedDates, dateStr, instance) {
-                // 在初始化完成后，给小时和分钟输入框添加name属性
+                // 在初始化完成后处理时间输入框
                 setTimeout(() => {
-                    // 修复小时和分钟输入框
+                    // 修复小时和分钟输入框 - 确保它们没有name属性，不参与表单提交
                     const hourInput = document.querySelector(".flatpickr-hour");
                     const minuteInput = document.querySelector(".flatpickr-minute");
                     
+                    // 处理小时输入框
                     if (hourInput) {
-                        hourInput.setAttribute("name", "flatpickr-hour");
-                        // 禁止该字段参与表单验证
-                        hourInput.setAttribute("formnovalidate", "true");
-                        hourInput.setAttribute("form", "flatpickr-form");
+                        // 移除所有可能导致问题的属性
+                        hourInput.removeAttribute("name");
+                        hourInput.removeAttribute("tabindex");
+                        hourInput.removeAttribute("step");
+                        hourInput.removeAttribute("min");
+                        hourInput.removeAttribute("max");
+                        hourInput.removeAttribute("maxlength");
+                        hourInput.setAttribute("type", "text"); // 改为text类型避免验证问题
+                        hourInput.setAttribute("aria-label", "小时");
+                        hourInput.setAttribute("inputmode", "numeric"); // 保持数字键盘
+                        
+                        // 添加事件处理器
+                        hourInput.addEventListener("change", function() {
+                            // 确保值在0-23之间
+                            let val = parseInt(this.value, 10);
+                            if (isNaN(val)) val = 0;
+                            if (val < 0) val = 0;
+                            if (val > 23) val = 23;
+                            this.value = val;
+                        });
                     }
                     
+                    // 处理分钟输入框
                     if (minuteInput) {
-                        minuteInput.setAttribute("name", "flatpickr-minute");
-                        // 禁止该字段参与表单验证
-                        minuteInput.setAttribute("formnovalidate", "true");
-                        minuteInput.setAttribute("form", "flatpickr-form");
+                        // 移除所有可能导致问题的属性
+                        minuteInput.removeAttribute("name");
+                        minuteInput.removeAttribute("tabindex");
+                        minuteInput.removeAttribute("step");
+                        minuteInput.removeAttribute("min");
+                        minuteInput.removeAttribute("max");
+                        minuteInput.removeAttribute("maxlength");
+                        minuteInput.setAttribute("type", "text"); // 改为text类型避免验证问题
+                        minuteInput.setAttribute("aria-label", "分钟");
+                        minuteInput.setAttribute("inputmode", "numeric"); // 保持数字键盘
+                        
+                        // 添加事件处理器
+                        minuteInput.addEventListener("change", function() {
+                            // 确保值在0-59之间
+                            let val = parseInt(this.value, 10);
+                            if (isNaN(val)) val = 0;
+                            if (val < 0) val = 0;
+                            if (val > 59) val = 59;
+                            this.value = val;
+                        });
                     }
                     
                     // 添加"现在"按钮
@@ -237,9 +427,6 @@
             }
         });
         
-        // 在控制台输出 flatpickr 对象，以便调试
-        console.log("Flatpickr instance:", datetimePicker);
-        
         // 当点击日历图标时，也打开日期选择器
         document.getElementById('datetime-addon').addEventListener('click', function() {
             // 简化处理
@@ -257,8 +444,8 @@
         // 自动聚焦到第一个输入框
         document.getElementById('title').focus();
         
-        // 刷新任务列表
-        document.getElementById('refreshTasksBtn').addEventListener('click', function() {
+        // 刷新任务列表函数
+        function refreshTaskList() {
             fetch('{{ url_for("task.get_tasks") }}')
                 .then(response => response.json())
                 .then(tasks => {
@@ -302,7 +489,7 @@
                                             : '<span class="badge bg-warning">待触发</span>'}
                                     </td>
                                     <td>
-                                        <form method="post" action="{{ url_for('task.delete_task', task_id=0) }}".replace('0', task.id) onsubmit="return confirm('确定要删除这个任务吗？');">
+                                        <form method="post" action="{{ url_for("task.delete_task", task_id=0) }}".replace('0', task.id) onsubmit="return confirm('确定要删除这个任务吗？');">
                                             <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
                                         </form>
                                     </td>
@@ -320,7 +507,16 @@
                     }
                 })
                 .catch(error => console.error('Error:', error));
-        });
+        }
+        
+        // 点击刷新按钮时刷新任务列表
+        document.getElementById('refreshTasksBtn').addEventListener('click', refreshTaskList);
+        
+        // 每30秒自动刷新一次任务列表，确保显示最新状态
+        setInterval(refreshTaskList, 30000);
+        
+        // 页面加载后也刷新一次任务列表
+        refreshTaskList();
     });
 </script>
 {% endblock %} 

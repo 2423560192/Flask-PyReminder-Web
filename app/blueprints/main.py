@@ -24,8 +24,9 @@ def index():
     available_tokens = Token.get_user_tokens(None if is_admin else username)
     print(f"用户 {username} 在首页可使用的通知账号: {list(available_tokens.keys())}")
     
-    # 获取任务列表
-    all_tasks = Task.get_all_tasks() if is_admin else Task.get_user_tasks(username)
+    # 获取任务列表（强制刷新，确保从Redis获取最新状态）
+    # 这里只需要修改方法调用，确保使用的是Redis中的最新数据
+    all_tasks = Task.get_all_tasks(username=None if is_admin else username, include_triggered=True, force_refresh=True)
     
     return render_template('index.html',
                         tasks=all_tasks,

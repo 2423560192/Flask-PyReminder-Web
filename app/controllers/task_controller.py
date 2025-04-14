@@ -180,8 +180,6 @@ class TaskChecker:
             try:
                 # 使用应用上下文
                 with app.app_context():
-                    # 获取Redis客户端（用于更新任务状态）
-                    r = redis_helper.get_client()
                     # 会话将在需要时获取
                     session = None
                     
@@ -217,61 +215,10 @@ class TaskChecker:
                                     if success:
                                         print(f"成功发送任务 {task.get('id')} 的通知")
                                         
-                                        # 如果有数据库会话，将关闭它并重新获取一个新的会话
-                                        # 这是为了避免会话超时问题
-                                        if session:
-                                            close_db_session(session)
-                                            session = get_db_session()
+                                        # 使用统一的方法标记任务为已触发
+                                        # 这个方法会更新Redis、数据库和内存中的状态
+                                        Task.mark_task_triggered(task.get('id'))
                                         
-                                        # 更新Redis中的任务状态
-                                        if r:
-                                            try:
-                                                task_id = task.get('id')
-                                                if isinstance(task_id, bytes):
-                                                    task_id = task_id.decode('utf-8')
-                                                
-                                                # 获取最新的任务数据
-                                                task_json = r.hget(TASKS_KEY, task_id)
-                                                if task_json:
-                                                    task_data = json.loads(task_json)
-                                                    task_data['triggered'] = True
-                                                    r.hset(TASKS_KEY, task_id, json.dumps(task_data))
-                                                    # 从待处理队列中移除
-                                                    r.zrem(PENDING_TASKS_KEY, task_id)
-                                                    print(f"已更新Redis中任务 {task_id} 的状态为已触发")
-                                            except Exception as e:
-                                                print(f"更新Redis中任务状态出错: {str(e)}")
-                                                import traceback
-                                                traceback.print_exc()
-                                        
-                                        # 更新数据库中的任务状态
-                                        # 首先尝试使用任务中可能保存的数据库对象引用
-                                        db_task = task.get('db_obj')
-                                        
-                                        # 如果没有数据库对象引用，尝试从数据库查询
-                                        if not db_task and session:
-                                            try:
-                                                db_task = session.query(Task).filter(Task.id == task.get('id')).first()
-                                            except Exception as e:
-                                                print(f"查询数据库任务时出错: {str(e)}")
-                                                import traceback
-                                                traceback.print_exc()
-                                        
-                                        # 如果找到数据库对象，更新其状态
-                                        if db_task and session:
-                                            try:
-                                                db_task.triggered = True
-                                                session.commit()
-                                                print(f"已更新数据库中任务 {task.get('id')} 的状态为已触发")
-                                            except Exception as e:
-                                                print(f"更新数据库任务状态出错: {str(e)}")
-                                                import traceback
-                                                traceback.print_exc()
-                                                session.rollback()
-                                                
-                                                # 如果更新失败，重新获取会话
-                                                close_db_session(session)
-                                                session = get_db_session()
                                     else:
                                         print(f"发送任务 {task.get('id')} 的通知失败")
 
