@@ -1,6 +1,7 @@
 from flask import request, redirect, url_for, flash, g
 from app.models.token import Token
 from app.config import get_config
+from app.utils.redis_helper import redis_helper
 
 config = get_config()
 
@@ -37,8 +38,7 @@ class TokenController:
             if token_name in tokens:
                 # 获取token所有者信息
                 owner = None
-                from app.utils.db import get_redis_client
-                r = get_redis_client()
+                r = redis_helper.get_client()
                 if r:
                     token_info_json = r.hget(f"{config.TOKENS_KEY}:info", token_name)
                     if token_info_json:
@@ -62,8 +62,7 @@ class TokenController:
         tokens[token_name] = token_value
         
         # 保存到数据库或Redis
-        from app.utils.db import  get_redis_client
-        r = get_redis_client()
+        r = redis_helper.get_client()
         
         # Redis存储（如果可用）
         if r:
@@ -159,8 +158,7 @@ class TokenController:
         if not is_admin:
             # 检查token所有者
             owner = None
-            from app.utils.db import get_redis_client
-            r = get_redis_client()
+            r = redis_helper.get_client()
             if r:
                 token_info_json = r.hget(f"{config.TOKENS_KEY}:info", token_name)
                 if token_info_json:
@@ -186,8 +184,7 @@ class TokenController:
             del tokens[token_name]
 
             # 如果Redis可用，直接从Redis删除
-            from app.utils.db import get_redis_client
-            r = get_redis_client()
+            r = redis_helper.get_client()
             if r:
                 # 1. 删除token值
                 r.hdel(config.TOKENS_KEY, token_name)

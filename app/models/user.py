@@ -311,20 +311,35 @@ class User(Base):
         return memory_users.get(username)
 
     @classmethod
-    def sync_to_postgres(cls, redis, db_session):
+    def sync_to_postgres(cls):
         """将Redis中的用户数据同步到MySQL"""
-        if not redis or not db_session:
-            print("Redis或数据库会话不可用，无法同步")
-            return
+        print("开始同步用户数据到数据库...")
+        
+        # 获取Redis和数据库连接
+        redis = redis_helper.get_client()
+        if not redis:
+            print("Redis连接不可用，无法同步用户数据")
+            return False
+            
+        db_session = get_db_session()
+        if not db_session:
+            print("数据库会话不可用，无法同步用户数据")
+            return False
 
         try:
-            print("开始同步用户数据到MySQL...")
             # 获取所有用户数据
             users = redis.hgetall(USERS_KEY)
             print(f"从Redis获取到 {len(users)} 个用户")
+            
+            # 同步计数器
+            sync_count = 0
 
             for username, user_json in users.items():
                 try:
+                    # 解析用户数据
+                    if isinstance(username, bytes):
+                        username = username.decode('utf-8')
+                        
                     user_data = json.loads(user_json)
                     print(f"正在同步用户: {username}")
 
@@ -360,32 +375,21 @@ class User(Base):
                             created_at=created_at
                         )
                         db_session.add(new_user)
-
-                    # 每处理10个用户就提交一次事务
-                    if db_session.new or db_session.dirty:
-                        try:
-                            db_session.commit()
-                            print(f"成功保存用户: {username}")
-                        except Exception as commit_error:
-                            print(f"保存用户 {username} 时出错: {str(commit_error)}")
-                            db_session.rollback()
+                        
+                    sync_count += 1
 
                 except Exception as e:
                     print(f"处理用户 {username} 时出错: {str(e)}")
                     continue
 
-            # 最后再提交一次，确保所有更改都已保存
-            if db_session.new or db_session.dirty:
-                try:
-                    db_session.commit()
-                    print("最后的更改已保存")
-                except Exception as final_error:
-                    print(f"保存最后的更改时出错: {str(final_error)}")
-                    db_session.rollback()
-
-            print("用户数据同步完成")
+            # 提交所有更改
+            db_session.commit()
+            print(f"成功同步 {sync_count} 个用户到数据库")
+            return True
 
         except Exception as e:
             print(f"用户数据同步失败: {str(e)}")
             db_session.rollback()
-            raise
+            return False
+        finally:
+            close_db_session(db_session)

@@ -2,6 +2,7 @@ import os
 import json
 import yaml
 import datetime
+import time
 from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.sql import func
 from sqlalchemy.types import DateTime
@@ -61,8 +62,9 @@ class Token(Base):
                     return redis_tokens
 
             # 其次尝试从PostgreSQL加载
-            if db_available:
-                tokens = db_session.query(cls).all()
+            session = get_db_session()
+            if session:
+                tokens = session.query(cls).all()
                 if tokens:
                     for token in tokens:
                         tokens_dict[token.name] = token.token
@@ -132,26 +134,30 @@ class Token(Base):
         return tokens_dict
 
     @classmethod
-    def add_token(cls, name, token, owner=None):
+    def add_token(cls, name, token_value, owner=None):
         """添加新令牌或更新现有令牌"""
         created_at = datetime.datetime.now(config.TZ)
+        current_timestamp = time.time()
 
         # 构建令牌数据
         token_data = {
             'name': name,
-            'token': token,
+            'token': token_value,
             'owner': owner,
-            'created_at': created_at.isoformat()
+            'created_at': created_at.isoformat(),
+            'updated_at': current_timestamp
         }
 
+        r = redis_helper.get_client()
         if r:
             # 保存到Redis
-            r.hset(cls.TOKENS_KEY, name, token)
+            r.hset(cls.TOKENS_KEY, name, token_value)
 
             # 保存令牌信息
             token_info = {
                 'owner': owner or 'system',
-                'created_at': created_at.isoformat()
+                'created_at': created_at.isoformat(),
+                'updated_at': current_timestamp
             }
             r.hset(cls.TOKEN_INFO_KEY, name, json.dumps(token_info))
 
@@ -170,42 +176,48 @@ class Token(Base):
 
             return True
 
-        elif db_available:
-            # 直接保存到数据库
-            try:
-                # 检查令牌是否已存在
-                token = db_session.query(cls).filter_by(name=name).first()
-
-                if token:
-                    # 更新现有令牌
-                    token.token = token
-                    if owner:
-                        token.owner = owner
-                else:
-                    # 创建新令牌
-                    new_token = cls(
-                        name=name,
-                        token=token,
-                        owner=owner,
-                        created_at=created_at
-                    )
-                    db_session.add(new_token)
-
-                db_session.commit()
-                return True
-            except Exception as e:
-                db_session.rollback()
-                print(f"保存令牌到数据库失败: {str(e)}")
-                return False
         else:
-            # 使用内存存储
-            memory_tokens[name] = token
-            memory_token_owners[name] = owner or 'system'
-            return True
+            # 尝试直接保存到数据库
+            session = get_db_session()
+            if session:
+                try:
+                    # 检查令牌是否已存在
+                    token_obj = session.query(cls).filter_by(name=name).first()
+
+                    if token_obj:
+                        # 更新现有令牌
+                        token_obj.token = token_value
+                        if owner:
+                            token_obj.owner = owner
+                    else:
+                        # 创建新令牌
+                        new_token = cls(
+                            name=name,
+                            token=token_value,
+                            owner=owner,
+                            created_at=created_at
+                        )
+                        session.add(new_token)
+
+                    session.commit()
+                    return True
+                except Exception as e:
+                    session.rollback()
+                    print(f"保存令牌到数据库失败: {str(e)}")
+                    # 如果数据库保存失败，使用内存存储
+                    memory_tokens[name] = token_value
+                    memory_token_owners[name] = owner or 'system'
+                    return True
+            else:
+                # 使用内存存储
+                memory_tokens[name] = token_value
+                memory_token_owners[name] = owner or 'system'
+                return True
 
     @classmethod
     def delete_token(cls, name):
         """删除令牌"""
+        r = redis_helper.get_client()
         if r:
             # 检查令牌是否存在
             if not r.hexists(cls.TOKENS_KEY, name):
@@ -241,30 +253,32 @@ class Token(Base):
 
             return True
 
-        elif db_available:
-            # 直接从数据库删除
-            try:
-                token = db_session.query(cls).filter_by(name=name).first()
-                if not token:
+        else:
+            # 尝试从数据库删除
+            session = get_db_session()
+            if session:
+                try:                    
+                    token = session.query(cls).filter_by(name=name).first()
+                    if not token:
+                        return False
+
+                    session.delete(token)
+                    session.commit()
+                    return True
+                except Exception as e:
+                    session.rollback()
+                    print(f"从数据库删除令牌失败: {str(e)}")
+                    return False
+            else:
+                # 从内存删除
+                if name not in memory_tokens:
                     return False
 
-                db_session.delete(token)
-                db_session.commit()
+                del memory_tokens[name]
+                if name in memory_token_owners:
+                    del memory_token_owners[name]
+
                 return True
-            except Exception as e:
-                db_session.rollback()
-                print(f"从数据库删除令牌失败: {str(e)}")
-                return False
-        else:
-            # 从内存删除
-            if name not in memory_tokens:
-                return False
-
-            del memory_tokens[name]
-            if name in memory_token_owners:
-                del memory_token_owners[name]
-
-            return True
 
     @classmethod
     def get_user_tokens(cls, username=None):
@@ -348,6 +362,7 @@ class Token(Base):
     @classmethod
     def set_token_owner(cls, token_name, owner):
         """设置token所有者"""
+        r = redis_helper.get_client()
         if r:
             # 检查token是否存在
             if not r.hexists(cls.TOKENS_KEY, token_name):
@@ -399,75 +414,155 @@ class Token(Base):
             print(f"已在Redis中设置token {token_name} 的所有者为 {owner}")
             return True
 
-        elif db_available:
-            # 直接在数据库中设置
-            try:
-                token = db_session.query(cls).filter_by(name=token_name).first()
-                if not token:
-                    print(f"在数据库中未找到token {token_name}")
+        else:
+            # 尝试在数据库中设置
+            session = get_db_session()
+            if session:
+                try:                    
+                    token = session.query(cls).filter_by(name=token_name).first()
+                    if not token:
+                        print(f"在数据库中未找到token {token_name}")
+                        return False
+
+                    token.owner = owner
+                    session.commit()
+                    print(f"已在数据库中设置token {token_name} 的所有者为 {owner}")
+                    return True
+                except Exception as e:
+                    session.rollback()
+                    print(f"设置token所有者时出错: {str(e)}")
+                    return False
+            else:
+                # 在内存中设置
+                if token_name not in memory_tokens:
+                    print(f"在内存中未找到token {token_name}")
                     return False
 
-                token.owner = owner
-                db_session.commit()
-                print(f"已在数据库中设置token {token_name} 的所有者为 {owner}")
+                memory_token_owners[token_name] = owner
+                print(f"已在内存中设置token {token_name} 的所有者为 {owner}")
                 return True
-            except Exception as e:
-                db_session.rollback()
-                print(f"设置token所有者时出错: {str(e)}")
-                return False
-        else:
-            # 在内存中设置
-            if token_name not in memory_tokens:
-                print(f"在内存中未找到token {token_name}")
-                return False
-
-            memory_token_owners[token_name] = owner
-            print(f"已在内存中设置token {token_name} 的所有者为 {owner}")
-            return True
 
     @classmethod
-    def sync_to_postgres(cls, redis, db_session):
+    def sync_to_postgres(cls):
         """将Redis中的令牌数据同步到PostgreSQL"""
-        if not redis or not db_available:
-            return
+        print("开始同步令牌数据到数据库...")
+        
+        # 获取Redis和数据库连接
+        redis = redis_helper.get_client()
+        if not redis:
+            print("Redis连接不可用，无法同步令牌数据")
+            return False
+            
+        db_session = get_db_session()
+        if not db_session:
+            print("数据库会话不可用，无法同步令牌数据")
+            return False
 
         try:
             # 获取所有令牌数据
             tokens = redis.hgetall(cls.TOKENS_KEY)
+            if not tokens:
+                print("Redis中没有找到任何令牌数据")
+                return True
+                
+            # 同步计数器
+            sync_count = 0
 
-            for token_id, token_json in tokens.items():
+            for token_name, token_value in tokens.items():
                 try:
-                    token_data = json.loads(token_json)
-
+                    # 获取令牌信息
+                    token_info_json = redis.hget(cls.TOKEN_INFO_KEY, token_name)
+                    token_info = json.loads(token_info_json) if token_info_json else {'owner': 'system'}
+                    
+                    # 转换字节类型为字符串
+                    if isinstance(token_name, bytes):
+                        token_name = token_name.decode('utf-8')
+                    if isinstance(token_value, bytes):
+                        token_value = token_value.decode('utf-8')
+                    
                     # 检查令牌是否已存在
-                    existing_token = db_session.query(cls).filter_by(id=token_id).first()
+                    existing_token = db_session.query(cls).filter_by(name=token_name).first()
 
                     if existing_token:
                         # 更新现有令牌
-                        existing_token.name = token_data['name']
-                        existing_token.owner = token_data['owner']
-                        existing_token.token = token_data['token']
-                        if 'created_at' in token_data:
-                            existing_token.created_at = datetime.datetime.fromisoformat(token_data['created_at'])
+                        existing_token.token = token_value
+                        existing_token.owner = token_info.get('owner', 'system')
+                        if 'created_at' in token_info:
+                            try:
+                                existing_token.created_at = datetime.datetime.fromisoformat(token_info['created_at'])
+                            except Exception:
+                                existing_token.created_at = datetime.datetime.now(config.TZ)
                     else:
                         # 创建新令牌
                         new_token = cls(
-                            id=token_id,
-                            name=token_data['name'],
-                            token=token_data['token'],
-                            owner=token_data['owner'],
-                            created_at=datetime.datetime.fromisoformat(
-                                token_data.get('created_at', datetime.datetime.now(config.TZ).isoformat()))
+                            name=token_name,
+                            token=token_value,
+                            owner=token_info.get('owner', 'system')
                         )
+                        if 'created_at' in token_info:
+                            try:
+                                new_token.created_at = datetime.datetime.fromisoformat(token_info['created_at'])
+                            except Exception:
+                                pass  # 使用默认创建时间
+                                
                         db_session.add(new_token)
+                        
+                    sync_count += 1
 
                 except Exception as e:
-                    print(f"同步令牌 {token_id} 时出错: {str(e)}")
+                    print(f"同步令牌 {token_name} 时出错: {str(e)}")
                     continue
 
+            # 提交所有更改
             db_session.commit()
-            print("令牌数据同步完成")
+            print(f"成功同步 {sync_count} 个令牌到数据库")
+            return True
 
         except Exception as e:
             db_session.rollback()
             print(f"令牌数据同步失败: {str(e)}")
+            return False
+        finally:
+            close_db_session(db_session)
+
+    @classmethod
+    def get_token(cls, token_name):
+        """获取指定名称的token的值"""
+        if not token_name:
+            return None
+            
+        # 从Redis获取
+        r = redis_helper.get_client()
+        if r:
+            try:
+                # 直接从Redis获取token
+                token_value = r.hget(cls.TOKENS_KEY, token_name)
+                if token_value:
+                    if isinstance(token_value, bytes):
+                        return token_value.decode('utf-8')
+                    return token_value
+            except Exception as e:
+                print(f"从Redis获取token失败: {str(e)}")
+                
+        # 从数据库获取
+        session = get_db_session()
+        if session:
+            try:
+                token_obj = session.query(cls).filter_by(name=token_name).first()
+                if token_obj:
+                    return token_obj.token
+            except Exception as e:
+                print(f"从数据库获取token失败: {str(e)}")
+            finally:
+                close_db_session(session)
+                
+        # 从内存获取
+        if token_name in memory_tokens:
+            return memory_tokens[token_name]
+            
+        # 使用默认token
+        if token_name == '默认':
+            return config.DEFAULT_NOTIFICATION_TOKEN
+            
+        print(f"未找到名为 {token_name} 的token")
+        return None

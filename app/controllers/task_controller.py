@@ -5,14 +5,17 @@ from app.models.task import Task
 from app.models.token import Token
 from app.utils.helpers import send_notification
 from app.config import get_config
-from app.utils.db import get_db_session
+from app.utils.db import get_db_session, close_db_session
+from app.utils.redis_helper import redis_helper
+from app.utils.constants import TASKS_KEY, PENDING_TASKS_KEY
 from datetime import datetime
 
 config = get_config()
 
+
 class TaskController:
     """任务控制器"""
-    
+
     @staticmethod
     def add_task():
         """添加任务"""
@@ -26,17 +29,28 @@ class TaskController:
 
         title = request.form.get('title', '未命名任务')
         content = request.form.get('content', '')
-        reminder_date = request.form.get('date', '')
-        reminder_time = request.form.get('time', '')
+
+        # 支持新的datetime字段和旧的date/time分开字段
+        datetime_str = request.form.get('datetime')
+
+        if datetime_str:
+            # 使用新的合并后的日期时间字段
+            reminder_date = None
+            reminder_time = None
+        else:
+            # 向后兼容：使用分开的日期和时间字段
+            reminder_date = request.form.get('date', '')
+            reminder_time = request.form.get('time', '')
+            datetime_str = f"{reminder_date} {reminder_time}" if reminder_date and reminder_time else ''
+
         token_name = request.form.get('token_name', '默认')
 
-        print(f"用户 {username} 正在添加任务，使用通知账号: {token_name}")
+        print(f"用户 {username} 正在添加任务，使用通知账号: {token_name}, 提醒时间: {datetime_str}")
 
         # 检查是否有权使用此token
         if not is_admin and token_name not in available_tokens:
             print(f"用户 {username} 尝试使用未授权的通知账号: {token_name}")
-            from app.utils.db import get_redis_client
-            r = get_redis_client()
+            r = redis_helper.get_client()
             if r:
                 token_info_json = r.hget(f"{config.TOKENS_KEY}:info", token_name)
                 if token_info_json:
@@ -57,8 +71,8 @@ class TaskController:
                     flash(f"通知账号 '{token_name}' 不存在或您无权使用", "danger")
                     return redirect(url_for('main.index'))
 
-        if not reminder_date or not reminder_time:
-            flash("日期和时间不能为空", "danger")
+        if not datetime_str:
+            flash("提醒时间不能为空", "danger")
             return redirect(url_for('main.index'))
 
         # 验证token名称是否存在
@@ -69,20 +83,19 @@ class TaskController:
         try:
             # 创建新任务
             task_id = Task.get_next_task_id()
-            datetime_str = f"{reminder_date} {reminder_time}"
-            
+
             # 保存任务
             if Task.save_task(task_id, title, content, datetime_str, token_name, username):
                 flash("任务添加成功！", "success")
             else:
                 flash("添加任务失败", "danger")
-            
+
             return redirect(url_for('main.index'))
         except ValueError as e:
             print(f"日期解析错误: {str(e)}")
             flash("日期格式错误，请使用YYYY-MM-DD HH:MM格式", "danger")
             return redirect(url_for('main.index'))
-    
+
     @staticmethod
     def delete_task(task_id):
         """删除任务"""
@@ -98,9 +111,9 @@ class TaskController:
                 flash("您只能删除自己创建的任务", "danger")
             else:
                 flash("任务不存在", "warning")
-        
+
         return redirect(url_for('main.index'))
-    
+
     @staticmethod
     def get_tasks():
         """获取任务列表"""
@@ -115,7 +128,7 @@ class TaskController:
         else:
             # 普通用户只能看到自己的任务
             all_tasks = Task.get_user_tasks(username)
-            print('所有任务： ' , all_tasks)
+            print('所有任务： ', all_tasks)
 
         serializable_tasks = []
 
@@ -126,71 +139,168 @@ class TaskController:
 
         return jsonify(serializable_tasks)
 
+
 class TaskChecker:
     """任务检查器，运行在后台线程"""
     
-    @staticmethod
-    def start_checker():
-        """启动任务检查线程"""
-        check_thread = threading.Thread(target=TaskChecker.check_tasks, daemon=True)
-        check_thread.start()
-        print("已启动任务检查线程")
-        return check_thread
-    
-    @staticmethod
-    def check_tasks():
+    _instance = None
+    _check_thread = None
+    _running = False
+
+    @classmethod
+    def start_checker(cls):
+        """启动任务检查线程（单例模式）"""
+        if cls._check_thread is None or not cls._check_thread.is_alive():
+            cls._running = True
+            cls._check_thread = threading.Thread(target=cls.check_tasks, daemon=True)
+            cls._check_thread.start()
+            print("已启动任务检查线程")
+        return cls._check_thread
+
+    @classmethod
+    def stop_checker(cls):
+        """停止任务检查线程"""
+        cls._running = False
+        print("任务检查线程将在下一次循环结束时停止")
+
+    @classmethod
+    def is_running(cls):
+        """检查任务检查线程是否在运行"""
+        return cls._running and cls._check_thread is not None and cls._check_thread.is_alive()
+
+    @classmethod
+    def check_tasks(cls):
         """检查并触发到期的任务"""
-        while True:
+        # 导入Flask应用
+        from app import create_app
+        app = create_app()
+        import json
+
+        while cls._running:
             try:
-                # 获取数据库会话
-                session = get_db_session()
-                if not session:
-                    print("无法获取数据库会话，等待重试...")
-                    time.sleep(60)  # 等待1分钟后重试
-                    continue
+                # 使用应用上下文
+                with app.app_context():
+                    # 获取Redis客户端（用于更新任务状态）
+                    r = redis_helper.get_client()
+                    # 会话将在需要时获取
+                    session = None
                     
-                try:
-                    # 获取当前时间
-                    now = datetime.now(config.TZ)
+                    print("开始检查待触发的任务...")
                     
-                    # 查询需要触发的任务
-                    tasks_to_trigger = session.query(Task).filter(
-                        Task.triggered == False,
-                        Task.datetime <= now
-                    ).all()
+                    try:
+                        # 使用Task模型的get_pending_tasks方法获取待触发的任务
+                        tasks_to_trigger = Task.get_pending_tasks()
+                        
+                        if tasks_to_trigger:
+                            print(f"找到 {len(tasks_to_trigger)} 个需要触发的任务")
+                            
+                            # 处理每个到期的任务
+                            for task in tasks_to_trigger:
+                                try:
+                                    # 获取通知Token
+                                    token_name = task.get('token_name')
+                                    if not token_name:
+                                        print(f"任务 {task.get('id')} 的通知Token名称为空")
+                                        continue
+
+                                    # 发送通知
+                                    task_time_str = task.get('datetime').strftime("%Y-%m-%d %H:%M:%S") if task.get('datetime') else "未知时间"
+
+                                    # 调用send_notification函数
+                                    success = send_notification(
+                                        task.get('title', '未命名任务'),
+                                        task.get('content', '') or "提醒时间到了！",
+                                        task_time_str,
+                                        token_name
+                                    )
+
+                                    if success:
+                                        print(f"成功发送任务 {task.get('id')} 的通知")
+                                        
+                                        # 如果有数据库会话，将关闭它并重新获取一个新的会话
+                                        # 这是为了避免会话超时问题
+                                        if session:
+                                            close_db_session(session)
+                                            session = get_db_session()
+                                        
+                                        # 更新Redis中的任务状态
+                                        if r:
+                                            try:
+                                                task_id = task.get('id')
+                                                if isinstance(task_id, bytes):
+                                                    task_id = task_id.decode('utf-8')
+                                                
+                                                # 获取最新的任务数据
+                                                task_json = r.hget(TASKS_KEY, task_id)
+                                                if task_json:
+                                                    task_data = json.loads(task_json)
+                                                    task_data['triggered'] = True
+                                                    r.hset(TASKS_KEY, task_id, json.dumps(task_data))
+                                                    # 从待处理队列中移除
+                                                    r.zrem(PENDING_TASKS_KEY, task_id)
+                                                    print(f"已更新Redis中任务 {task_id} 的状态为已触发")
+                                            except Exception as e:
+                                                print(f"更新Redis中任务状态出错: {str(e)}")
+                                                import traceback
+                                                traceback.print_exc()
+                                        
+                                        # 更新数据库中的任务状态
+                                        # 首先尝试使用任务中可能保存的数据库对象引用
+                                        db_task = task.get('db_obj')
+                                        
+                                        # 如果没有数据库对象引用，尝试从数据库查询
+                                        if not db_task and session:
+                                            try:
+                                                db_task = session.query(Task).filter(Task.id == task.get('id')).first()
+                                            except Exception as e:
+                                                print(f"查询数据库任务时出错: {str(e)}")
+                                                import traceback
+                                                traceback.print_exc()
+                                        
+                                        # 如果找到数据库对象，更新其状态
+                                        if db_task and session:
+                                            try:
+                                                db_task.triggered = True
+                                                session.commit()
+                                                print(f"已更新数据库中任务 {task.get('id')} 的状态为已触发")
+                                            except Exception as e:
+                                                print(f"更新数据库任务状态出错: {str(e)}")
+                                                import traceback
+                                                traceback.print_exc()
+                                                session.rollback()
+                                                
+                                                # 如果更新失败，重新获取会话
+                                                close_db_session(session)
+                                                session = get_db_session()
+                                    else:
+                                        print(f"发送任务 {task.get('id')} 的通知失败")
+
+                                except Exception as e:
+                                    print(f"处理任务 {task.get('id')} 时出错: {str(e)}")
+                                    import traceback
+                                    traceback.print_exc()
+                                    if session:
+                                        try:
+                                            session.rollback()
+                                        except:
+                                            pass
+                                    continue
+                        else:
+                            print("没有找到需要触发的任务")
+                            
+                    except Exception as e:
+                        print(f"获取待触发任务时出错: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
                     
-                    # 处理每个到期的任务
-                    for task in tasks_to_trigger:
-                        try:
-                            # 获取通知Token
-                            token = Token.get_token(task.token_name)
-                            if not token:
-                                print(f"任务 {task.id} 的通知Token不存在")
-                                continue
-                                
-                            # 发送通知
-                            send_notification(
-                                token,
-                                task.title,
-                                task.content or "提醒时间到了！"
-                            )
-                            
-                            # 标记任务为已触发
-                            task.triggered = True
-                            session.commit()
-                            
-                        except Exception as e:
-                            print(f"处理任务 {task.id} 时出错: {str(e)}")
-                            session.rollback()
-                            continue
-                            
-                finally:
                     # 确保会话被关闭
-                    from app.utils.db import close_db_session
-                    close_db_session(session)
-                    
+                    if session:
+                        close_db_session(session)
+
             except Exception as e:
                 print(f"任务检查出错: {str(e)}")
-                
+                import traceback
+                traceback.print_exc()
+
             # 等待下一次检查
-            time.sleep(60)  # 每分钟检查一次 
+            time.sleep(60)  # 每分钟检查一次

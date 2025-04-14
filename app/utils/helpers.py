@@ -173,22 +173,31 @@ def admin_required(f):
 def send_notification(task_title, task_content, task_time, token_name="默认", tokens=None):
     """发送通知"""
     try:
-        # 首先刷新tokens以确保使用最新的数据
-        if r and not tokens:
-            refreshed_tokens = r.hgetall(config.TOKENS_KEY)
-            if refreshed_tokens:
-                tokens = refreshed_tokens
-        elif not tokens:
-            # 使用传入的tokens或者确保有默认值
-            tokens = {"默认": config.DEFAULT_NOTIFICATION_TOKEN}
+        # 首先尝试获取指定的token
+        if not tokens:
+            try:
+                # 如果没有提供token，尝试从Token类获取
+                from app.models.token import Token
+                token = Token.get_token(token_name)
+                if token:
+                    # 不需要刷新tokens，直接使用找到的token
+                    pass
+                else:
+                    # 如果找不到指定的token，尝试使用默认token
+                    token = Token.get_token("默认")
+                    print(f"警告: 通知账号'{token_name}'不存在，将使用默认通知账号")
+            except Exception as e:
+                print(f"获取token时出错: {str(e)}")
+                # 使用配置的默认token
+                token = config.DEFAULT_NOTIFICATION_TOKEN
+        else:
+            # 使用传入的tokens字典
+            token = tokens.get(token_name)
+            if not token:
+                print(f"警告: 通知账号'{token_name}'不存在，将使用默认通知账号")
+                token = tokens.get("默认", config.DEFAULT_NOTIFICATION_TOKEN)
 
-        # 获取指定名称的token
-        token = tokens.get(token_name)
-        if not token:
-            print(f"警告: 通知账号'{token_name}'不存在，将使用默认通知账号")
-            token = tokens.get("默认")
-
-        # 如果默认账号也不存在，这是一个严重错误
+        # 如果所有尝试都失败，无法发送通知
         if not token:
             print("错误: 无法找到有效的通知账号，无法发送通知")
             return False

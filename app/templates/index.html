@@ -3,6 +3,8 @@
 {% block title %}时间提醒助手 - 首页{% endblock %}
 
 {% block styles %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/material_blue.css">
 <style>
     .task-list {
         max-height: 600px;
@@ -19,6 +21,21 @@
     }
     .no-tasks {
         padding: 40px 0;
+    }
+    /* 日期时间选择器样式 */
+    .flatpickr-input {
+        cursor: pointer;
+        background-color: #fff;
+    }
+    .flatpickr-input:focus {
+        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        border-color: #86b7fe;
+    }
+    .cursor-pointer {
+        cursor: pointer;
+    }
+    #datetime-addon {
+        cursor: pointer;
     }
 </style>
 {% endblock %}
@@ -42,12 +59,14 @@
                     </div>
                     <div class="row mb-3">
                         <div class="col">
-                            <label for="date" class="form-label">日期</label>
-                            <input type="date" class="form-control" id="date" name="date" required>
-                        </div>
-                        <div class="col">
-                            <label for="time" class="form-label">时间</label>
-                            <input type="time" class="form-control" id="time" name="time" required>
+                            <label for="datetime" class="form-label">提醒时间</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="datetime" name="datetime" placeholder="点击选择日期和时间" required>
+                                <span class="input-group-text bg-primary text-white" id="datetime-addon">
+                                    <i class="bi bi-calendar-event"></i>
+                                </span>
+                            </div>
+                            <div class="form-text">格式: 年-月-日 时:分 (24小时制)</div>
                         </div>
                     </div>
                     <div class="mb-3">
@@ -127,24 +146,116 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/zh.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // 初始化日期选择器
-        flatpickr("#date", {
-            locale: "zh",
-            dateFormat: "Y-m-d",
-            defaultDate: "today"
-        });
-        
-        // 初始化时间选择器
-        flatpickr("#time", {
+        // 初始化日期时间选择器
+        const datetimeInput = document.getElementById('datetime');
+        const datetimePicker = flatpickr(datetimeInput, {
             locale: "zh",
             enableTime: true,
-            noCalendar: true,
-            dateFormat: "H:i",
+            dateFormat: "Y-m-d H:i",
             time_24hr: true,
-            defaultDate: new Date(new Date().setHours(new Date().getHours() + 1, 0, 0))
+            minuteIncrement: 5,
+            defaultDate: new Date(new Date().setHours(new Date().getHours() + 1, 0, 0)),
+            allowInput: true,
+            // 添加一些额外的配置，使其更易用
+            disableMobile: false, // 在移动设备上使用更好的原生选择器
+            static: true,  // 防止日历被其他元素遮挡
+            position: "auto", // 自动选择最佳位置
+            
+            // 解决分钟输入框没有name属性的问题
+            onReady: function(selectedDates, dateStr, instance) {
+                // 在初始化完成后，给小时和分钟输入框添加name属性
+                setTimeout(() => {
+                    // 修复小时和分钟输入框
+                    const hourInput = document.querySelector(".flatpickr-hour");
+                    const minuteInput = document.querySelector(".flatpickr-minute");
+                    
+                    if (hourInput) {
+                        hourInput.setAttribute("name", "flatpickr-hour");
+                        // 禁止该字段参与表单验证
+                        hourInput.setAttribute("formnovalidate", "true");
+                        hourInput.setAttribute("form", "flatpickr-form");
+                    }
+                    
+                    if (minuteInput) {
+                        minuteInput.setAttribute("name", "flatpickr-minute");
+                        // 禁止该字段参与表单验证
+                        minuteInput.setAttribute("formnovalidate", "true");
+                        minuteInput.setAttribute("form", "flatpickr-form");
+                    }
+                    
+                    // 添加"现在"按钮
+                    const nowBtn = document.createElement("button");
+                    nowBtn.type = "button";
+                    nowBtn.className = "btn btn-sm btn-primary me-2 mt-2";
+                    nowBtn.innerHTML = "现在";
+                    nowBtn.addEventListener("click", function() {
+                        const now = new Date();
+                        instance.setDate(now);
+                    });
+                    
+                    // 添加"今晚 20:00"按钮
+                    const tonightBtn = document.createElement("button");
+                    tonightBtn.type = "button";
+                    tonightBtn.className = "btn btn-sm btn-secondary me-2 mt-2";
+                    tonightBtn.innerHTML = "今晚 20:00";
+                    tonightBtn.addEventListener("click", function() {
+                        const tonight = new Date();
+                        tonight.setHours(20, 0, 0, 0);
+                        instance.setDate(tonight);
+                    });
+                    
+                    // 添加"明天 9:00"按钮
+                    const tomorrowBtn = document.createElement("button");
+                    tomorrowBtn.type = "button";
+                    tomorrowBtn.className = "btn btn-sm btn-secondary mt-2";
+                    tomorrowBtn.innerHTML = "明天 9:00";
+                    tomorrowBtn.addEventListener("click", function() {
+                        const tomorrow = new Date();
+                        tomorrow.setDate(tomorrow.getDate() + 1);
+                        tomorrow.setHours(9, 0, 0, 0);
+                        instance.setDate(tomorrow);
+                    });
+                    
+                    // 找到时间选择器元素并添加按钮
+                    const calendar = document.querySelector(".flatpickr-calendar");
+                    if (calendar) {
+                        const timeContainer = calendar.querySelector(".flatpickr-time");
+                        if (timeContainer) {
+                            const btnContainer = document.createElement("div");
+                            btnContainer.className = "d-flex justify-content-center";
+                            btnContainer.appendChild(nowBtn);
+                            btnContainer.appendChild(tonightBtn);
+                            btnContainer.appendChild(tomorrowBtn);
+                            timeContainer.parentNode.insertBefore(btnContainer, timeContainer.nextSibling);
+                        }
+                    }
+                }, 100);
+            }
         });
+        
+        // 在控制台输出 flatpickr 对象，以便调试
+        console.log("Flatpickr instance:", datetimePicker);
+        
+        // 当点击日历图标时，也打开日期选择器
+        document.getElementById('datetime-addon').addEventListener('click', function() {
+            // 简化处理
+            if (datetimeInput._flatpickr) {
+                datetimeInput._flatpickr.toggle();
+            } else {
+                // 如果无法通过 _flatpickr 访问，直接点击输入框
+                datetimeInput.click();
+            }
+        });
+        
+        // 给日期时间输入框添加视觉提示，让用户知道它是可以点击的
+        datetimeInput.classList.add('cursor-pointer');
+        
+        // 自动聚焦到第一个输入框
+        document.getElementById('title').focus();
         
         // 刷新任务列表
         document.getElementById('refreshTasksBtn').addEventListener('click', function() {
