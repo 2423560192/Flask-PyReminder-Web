@@ -47,6 +47,10 @@ def create_app():
     app.register_blueprint(auth_bp)
     app.register_blueprint(token_bp)
     app.register_blueprint(task_bp)
+    
+    # 添加系统蓝图
+    from app.blueprints.system import system_bp
+    app.register_blueprint(system_bp)
 
     # 注册模板过滤器
     @app.template_filter('format_datetime')

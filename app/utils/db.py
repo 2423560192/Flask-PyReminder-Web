@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.pool import QueuePool
 from flask import current_app, g
 from app.config import get_config
-from app.utils.redis_helper import redis_helper
+from app.utils import redis_helper
 
 config = get_config()
 
@@ -65,7 +65,7 @@ def setup_database(app):
         
         # 测试Redis连接
         try:
-            redis_client = redis_helper.get_client()
+            redis_client = get_redis_client()
             redis_client.ping()
             app.config['REDIS_AVAILABLE'] = True
             print("Redis连接成功")
@@ -90,8 +90,13 @@ def setup_database(app):
         }
 
 def get_redis_client():
-    """从连接池获取Redis客户端"""
-    return redis_helper.get_client()
+    """从连接池获取Redis客户端，安全地处理上下文"""
+    try:
+        from app.utils.redis_helper import redis_helper
+        return redis_helper.get_client()
+    except Exception as e:
+        print(f"获取Redis客户端出错: {str(e)}")
+        return None
 
 def get_db_session():
     """获取数据库会话，从连接池中获取"""

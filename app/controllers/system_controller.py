@@ -1,15 +1,25 @@
 import os
 import datetime
-from flask import g, jsonify
+import json
+from flask import g, jsonify, current_app
 from app.models.token import Token
 from app.models.task import Task
-from app.utils.db import db_available, get_redis_client
+from app.utils.db import get_redis_client
 from app.config import get_config
 from app.utils.sync_manager import SyncManager, SYNC_STATUS_KEY
 from app.models.user import User
+import sys
 
 config = get_config()
-r = get_redis_client()
+# 使用延迟加载方式，而不是在模块导入时获取Redis连接
+_redis_client = None
+
+def get_module_redis():
+    """延迟加载Redis客户端，确保在应用上下文中使用"""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = get_redis_client()
+    return _redis_client
 
 class SystemController:
     """系统控制器"""
@@ -18,6 +28,9 @@ class SystemController:
     def get_system_info():
         """获取系统信息"""
         now = config.get_now()
+        
+        # 获取Redis客户端
+        r = get_redis_client()
         
         # 记录程序启动时间
         from app import STARTUP_TIME
@@ -33,6 +46,15 @@ class SystemController:
 
         # 获取内存任务数量
         memory_tasks_count = len(Task.tasks) if not r else 0
+        
+        # 获取用户数量
+        total_users = 0
+        if r:
+            try:
+                # 使用try/except来处理可能的键类型错误
+                total_users = len(r.keys("user:*")) or 0
+            except Exception as e:
+                print(f"统计用户数量出错: {str(e)}")
 
         system_data = {
             "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
@@ -46,8 +68,8 @@ class SystemController:
             "total_tasks": len(Task.get_all_tasks()),
             "memory_tasks": memory_tasks_count,
             "total_tokens": len(tokens),
-            "total_users": r.hlen(config.USERS_KEY) if r else 0,
-            "python_version": os.popen('python --version').read().strip(),
+            "total_users": total_users,
+            "python_version": sys.version.split()[0],
         }
         
         return system_data
@@ -66,6 +88,7 @@ class SystemController:
     @staticmethod
     def get_sync_status():
         """获取数据同步状态"""
+        # 获取Redis客户端
         redis = get_redis_client()
         if redis is None:
             return jsonify({

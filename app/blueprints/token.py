@@ -31,8 +31,14 @@ def manage_tokens():
             else:
                 token_owners[token_name] = '系统'
 
-    return render_template('token/manage.html', tokens=tokens, token_owners=token_owners,
-                        redis_connected=r is not None)
+    # 添加当前时间，用于base.html模板中的年份显示
+    now = config.get_now()
+
+    return render_template('token/manage.html', 
+                        tokens=tokens, 
+                        token_owners=token_owners,
+                        redis_connected=r is not None,
+                        now=now)
 
 @token_bp.route('/user')
 @login_required

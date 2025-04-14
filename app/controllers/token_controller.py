@@ -18,7 +18,16 @@ class TokenController:
         token_name = request.form.get('token_name', '').strip()
         token_value = request.form.get('token_value', '').strip()
         
-        print(f"用户 {username} 正在添加/更新token: {token_name}")
+        # 管理员可以指定token所有者
+        token_owner = request.form.get('token_owner', '').strip()
+        if is_admin and token_owner:
+            # 管理员指定了token所有者
+            owner_username = token_owner
+            print(f"管理员 {username} 正在为用户 {owner_username} 添加/更新token: {token_name}")
+        else:
+            # 普通用户或管理员未指定所有者，使用当前用户
+            owner_username = username
+            print(f"用户 {username} 正在添加/更新token: {token_name}")
         
         # 验证输入
         if not token_name:
@@ -95,14 +104,14 @@ class TokenController:
                 import json
                 import datetime
                 token_info = {
-                    'owner': username,
+                    'owner': owner_username,
                     'created_at': datetime.datetime.now(config.TZ).isoformat()
                 }
-                print(f"保存token所有者信息: {token_name} -> {username}")
+                print(f"保存token所有者信息: {token_name} -> {owner_username}")
                 r.hset(f"{config.TOKENS_KEY}:info", token_name, json.dumps(token_info))
                 
                 # 4. 记录用户拥有的token集合
-                user_tokens_key = f"user:{username}:tokens"
+                user_tokens_key = f"user:{owner_username}:tokens"
                 print(f"添加到用户集合: {user_tokens_key} 添加 {token_name}")
                 r.sadd(user_tokens_key, token_name)
                 
