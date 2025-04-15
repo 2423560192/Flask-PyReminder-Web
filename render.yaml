@@ -5,12 +5,14 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn run:app
+    startCommand: gunicorn -c gunicorn_config.py run:app
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true  # 自动生成随机密钥
       - key: FLASK_DEBUG
-        value: "False"
+        value: false
+      - key: PYTHONUNBUFFERED
+        value: true
       - key: NOTIFICATION_TOKEN
         sync: false  # 允许手动设置
       - key: TIMEZONE

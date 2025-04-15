@@ -12,16 +12,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger('pyreminder')
 
-# 定义全局变量
-app = None
-
-def init_app():
+# 初始化应用（适用于Gunicorn）
+def _init_app():
     """延迟初始化应用，避免循环导入"""
-    global app
-    if app is None:
-        from app import create_app
-        app = create_app()
-    return app
+    from app import create_app
+    return create_app()
+
+# 导出给Gunicorn使用的应用对象
+app = _init_app()
 
 # 全局清理函数
 def cleanup_resources():
@@ -54,9 +52,6 @@ def cleanup_resources():
 atexit.register(cleanup_resources)
 
 if __name__ == '__main__':
-    # 初始化应用
-    app = init_app()
-    
     # 设置调试模式
     debug = os.getenv('FLASK_DEBUG', 'True').lower() in ['true', '1', 'yes']
     
