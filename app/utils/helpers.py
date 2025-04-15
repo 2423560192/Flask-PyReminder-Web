@@ -13,6 +13,7 @@ config = get_config()
 # 内存存储模式的任务列表（仅当Redis不可用时使用）
 tasks = []
 
+
 def parse_datetime(datetime_str):
     """解析日期时间字符串为datetime对象"""
     try:
@@ -77,6 +78,7 @@ def parse_datetime(datetime_str):
         except Exception as e:
             raise ValueError(f"无法解析日期时间: {datetime_str}，错误: {str(e)}")
 
+
 # JWT相关函数
 def generate_token(user_id, is_admin=False):
     """生成JWT令牌"""
@@ -91,6 +93,7 @@ def generate_token(user_id, is_admin=False):
         config.JWT_SECRET_KEY,
         algorithm='HS256'
     )
+
 
 def decode_token(token):
     """解码并验证JWT令牌"""
@@ -108,6 +111,7 @@ def decode_token(token):
         # 令牌无效
         return None
 
+
 def get_token_from_request():
     """从请求中获取令牌"""
     # 从Cookie中获取
@@ -122,8 +126,10 @@ def get_token_from_request():
 
     return None
 
+
 def login_required(f):
     """登录验证装饰器"""
+
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token = get_token_from_request()
@@ -142,10 +148,13 @@ def login_required(f):
         g.is_admin = payload.get('admin', False)
 
         return f(*args, **kwargs)
+
     return decorated_function
+
 
 def admin_required(f):
     """管理员权限验证装饰器"""
+
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token = get_token_from_request()
@@ -168,7 +177,9 @@ def admin_required(f):
         g.is_admin = True
 
         return f(*args, **kwargs)
+
     return decorated_function
+
 
 def send_notification(task_title, task_content, task_time, token_name="默认", tokens=None):
     """发送通知"""
@@ -203,7 +214,7 @@ def send_notification(task_title, task_content, task_time, token_name="默认", 
             return False
 
         params = {
-            'title': '任务提醒通知',
+            'title': task_title,
             'content': f"""任务名称: {task_title}\n
 任务内容: {task_content}\n
 提醒时间: {task_time}\n
@@ -243,4 +254,4 @@ def send_notification(task_title, task_content, task_time, token_name="默认", 
         print(f"发送通知失败，详细错误: {str(e)}")
         import traceback
         traceback.print_exc()  # 打印详细堆栈信息
-        return False 
+        return False

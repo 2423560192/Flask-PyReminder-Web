@@ -160,13 +160,43 @@ class RedisHelper:
         """清理Redis客户端连接"""
         # 只在请求上下文中尝试关闭连接
         try:
+            from flask import g, has_request_context
             if has_request_context() and hasattr(g, 'redis_client'):
                 client = g.pop('redis_client', None)
                 if client:
                     client.close()
-        except Exception:
-            # 上下文检查出错，忽略
+        except ImportError:
+            # Flask可能未导入，忽略
             pass
+        except RuntimeError as e:
+            # 上下文检查出错但不是致命错误
+            print(f"关闭Redis连接时出错: {str(e)}")
+        except Exception as e:
+            # 其他错误
+            print(f"关闭Redis连接时发生未预期的错误: {str(e)}")
+            
+        # 尝试关闭独立客户端
+        try:
+            if self._standalone_client:
+                self._standalone_client.close()
+                self._standalone_client = None
+        except Exception:
+            # 忽略独立客户端关闭错误
+            pass
+
+    def check_connection(self):
+        """检查Redis连接是否可用
+        返回布尔值表示连接状态
+        """
+        try:
+            client = self.get_standalone_client()
+            if client:
+                client.ping()
+                return True
+            return False
+        except Exception as e:
+            print(f"Redis连接检查失败: {str(e)}")
+            return False
 
 # 创建全局RedisHelper实例
 redis_helper = RedisHelper()
