@@ -46,7 +46,7 @@ def setup_database(app):
     # 尝试连接数据库
     try:
         DATABASE_URL = config.DATABASE_URL
-        app.logger.info(f"正在尝试连接PostgreSQL数据库: {DATABASE_URL}")
+        app.logger.info(f"正在尝试连接数据库: {DATABASE_URL}")
         
         # 创建数据库引擎
         engine = create_engine(DATABASE_URL)
@@ -67,10 +67,10 @@ def setup_database(app):
         with engine.connect() as conn:
             conn.execute("SELECT 1")
             db_available = True
-            app.logger.info("PostgreSQL数据库连接成功")
+            app.logger.info("数据库连接成功")
     except Exception as e:
         db_available = False
-        app.logger.error(f"PostgreSQL数据库连接失败: {str(e)}")
+        app.logger.error(f"数据库连接失败: {str(e)}")
     
     return db_available
 

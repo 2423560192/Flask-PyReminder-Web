@@ -1,4 +1,5 @@
 import datetime
+import logging
 import os
 import threading
 from flask import Flask, render_template, g
@@ -109,8 +110,8 @@ def create_app():
             print("警告: 数据库初始化失败，应用可能无法正常工作")
         if not redis_available:
             print("警告: Redis初始化失败，应用可能无法正常工作")
-            
         # 初始化后台服务 - 仅在主进程中执行一次
+
         if (not app.debug or (app.debug and os.environ.get('WERKZEUG_RUN_MAIN') == 'true')):
             # 使用锁确保线程安全
             with startup_lock:

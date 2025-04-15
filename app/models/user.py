@@ -16,8 +16,8 @@ config = get_config()
 memory_users = {}
 
 # Redis键名
-USERS_KEY = "users"  # 存储所有用户的哈希表
-USER_ID_COUNTER = "user:id_counter"  # 用户ID计数器
+USERS_KEY = config.USERS_KEY  # 存储所有用户的哈希表
+USER_ID_COUNTER = config.USER_ID_COUNTER  # 用户ID计数器
 
 
 class User(Base):
@@ -92,7 +92,7 @@ class User(Base):
         """
         # 密码加密
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-        
+
         # 1. 首先尝试从Redis获取用户信息
         redis = redis_helper.get_client()
         if redis:
@@ -104,7 +104,7 @@ class User(Base):
                         return True, user_data.get('is_admin', False)
                 except Exception as e:
                     print(f"解析用户数据出错: {str(e)}")
-        
+
         # 2. 如果Redis查询失败，尝试从数据库获取
         db_session = get_db_session()
         if db_session:
@@ -116,13 +116,13 @@ class User(Base):
                 print(f"从数据库验证用户时出错: {str(e)}")
             finally:
                 close_db_session(db_session)
-        
+
         # 3. 最后尝试从内存缓存获取
         if username in memory_users:
             user_data = memory_users.get(username, {})
             if password_hash == user_data.get('password_hash', ''):
                 return True, user_data.get('is_admin', False)
-        
+
         # 验证失败
         return False, False
 
@@ -320,13 +320,13 @@ class User(Base):
     def sync_to_postgres(cls):
         """将Redis中的用户数据同步到MySQL"""
         print("开始同步用户数据到数据库...")
-        
+
         # 获取Redis和数据库连接
         redis = redis_helper.get_client()
         if not redis:
             print("Redis连接不可用，无法同步用户数据")
             return False
-            
+
         db_session = get_db_session()
         if not db_session:
             print("数据库会话不可用，无法同步用户数据")
@@ -336,7 +336,7 @@ class User(Base):
             # 获取所有用户数据
             users = redis.hgetall(USERS_KEY)
             print(f"从Redis获取到 {len(users)} 个用户")
-            
+
             # 同步计数器
             sync_count = 0
 
@@ -345,7 +345,7 @@ class User(Base):
                     # 解析用户数据
                     if isinstance(username, bytes):
                         username = username.decode('utf-8')
-                        
+
                     user_data = json.loads(user_json)
                     print(f"正在同步用户: {username}")
 
@@ -381,7 +381,7 @@ class User(Base):
                             created_at=created_at
                         )
                         db_session.add(new_user)
-                        
+
                     sync_count += 1
 
                 except Exception as e:
@@ -423,10 +423,10 @@ class User(Base):
             bool: 是否成功确保管理员存在
         """
         print("检查系统管理员账户...")
-        
+
         # 检查是否有管理员
         has_admin = False
-        
+
         # 1. 从Redis检查
         redis = redis_helper.get_client()
         if redis:
@@ -436,12 +436,13 @@ class User(Base):
                     user_data = json.loads(user_json)
                     if user_data.get('is_admin', False):
                         has_admin = True
-                        print(f"找到现有管理员: {username.decode('utf-8') if isinstance(username, bytes) else username}")
+                        print(
+                            f"找到现有管理员: {username.decode('utf-8') if isinstance(username, bytes) else username}")
                         break
                 except Exception as e:
                     print(f"解析用户数据出错: {str(e)}")
                     continue
-        
+
         # 2. 如果Redis没有找到管理员，从数据库检查
         if not has_admin:
             db_session = get_db_session()
@@ -455,24 +456,24 @@ class User(Base):
                     print(f"查询管理员时出错: {str(e)}")
                 finally:
                     close_db_session(db_session)
-        
+
         # 3. 如果没有管理员，创建一个
         if not has_admin:
             print("系统中没有管理员账户，尝试创建...")
-            
+
             # 尝试将环境变量中的ADMIN_USERNAME设为管理员
             admin_username = config.ADMIN_USERNAME
-            
+
             # 检查用户是否存在
             user = cls.get_user(admin_username)
-            
+
             if user:
                 # 用户存在，设为管理员
                 print(f"找到用户 {admin_username}，将其设为管理员")
                 return cls.set_admin(admin_username, True)
             else:
                 # 用户不存在，创建一个新管理员
-                admin_password = 'Admin@' + hashlib.md5(str(datetime.datetime.now().timestamp()).encode()).hexdigest()[:6]  # 生成随机密码
+                admin_password = config.ADMIN_PASSWORD_HASH
                 print(f"创建默认管理员账户: {admin_username}")
                 success = cls.create_user(admin_username, admin_password, True)
                 if success:
@@ -481,5 +482,5 @@ class User(Base):
                 else:
                     print("创建管理员账户失败")
                     return False
-        
+
         return has_admin
