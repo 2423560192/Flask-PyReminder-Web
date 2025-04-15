@@ -165,7 +165,7 @@
 
     <footer class="bg-light py-3 mt-4">
         <div class="container text-center">
-            <p class="mb-1">时间提醒助手 &copy; {{ now.year if now else '2023' }}. 版权所有.</p>
+            <p class="mb-1">时间提醒助手 &copy; {{ now.year if now else '2025' }}. 版权所有.</p>
             <p class="text-muted mb-0 small">当前时间: {{ now.strftime('%Y-%m-%d %H:%M:%S') if now else '未知' }}</p>
             <p class="text-muted mb-0 small">
                 {% if redis_connected %}
