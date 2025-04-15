@@ -4,8 +4,9 @@ import os
 import threading
 from flask import Flask, render_template, g
 from flask_cors import CORS
-from app.utils.db import setup_database, close_db_session
+from app.utils.db import setup_database, close_db_session, db_session
 from app.config import get_config
+from app.utils.redis_helper import redis_helper
 
 # 记录程序启动时间
 STARTUP_TIME = datetime.datetime.now()
@@ -73,25 +74,31 @@ def create_app():
     def server_error(e):
         return render_template('error.html', error="服务器内部错误", code=500), 500
 
-    # 注册应用关闭时的清理操作
-    @app.teardown_appcontext
     def cleanup(exception=None):
-        """清理函数，在请求结束时关闭数据库会话和Redis连接"""
+        """清理数据库会话和Redis连接"""
         try:
-            from app.utils.db import close_db_session
-            close_db_session()
+            # 关闭数据库会话
+            from app.utils.db import db_session
+            if db_session is not None:
+                db_session.close()
+                print("数据库会话已关闭")
         except Exception as e:
-            app.logger.error(f"关闭数据库会话时出错: {str(e)}")
-            
-        try:
-            from app.utils.redis_helper import redis_helper
-            redis_helper.close()
-        except Exception as e:
-            app.logger.error(f"关闭Redis连接时出错: {str(e)}")
+            print(f"关闭数据库会话时出错: {str(e)}")
         
-        if exception:
-            app.logger.error(f"请求处理过程中出现异常: {str(exception)}")
-    
+        try:
+            # 关闭Redis连接
+            redis_helper.close()
+            print("Redis连接已关闭")
+        except Exception as e:
+            print(f"关闭Redis连接时出错: {str(e)}")
+
+    # 注册清理函数
+    app.teardown_appcontext(cleanup)
+
+    # 注册应用关闭时的清理函数
+    import atexit
+    atexit.register(cleanup)
+
     # 保存全局引用
     flask_app = app
     
@@ -102,7 +109,6 @@ def create_app():
         app.config['DB_AVAILABLE'] = db_status
         
         # 初始化Redis连接
-        from app.utils.redis_helper import redis_helper
         redis_available = redis_helper.check_connection()
         app.config['REDIS_AVAILABLE'] = redis_available
         

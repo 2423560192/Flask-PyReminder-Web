@@ -13,15 +13,7 @@ from app.models.user import User
 from app.models.token import Token
 from app.models.task import Task
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-logger = logging.getLogger('SyncManager')
 config = get_config()
-
 
 class SyncManager:
     """数据同步管理器"""
@@ -43,6 +35,14 @@ class SyncManager:
             self.sync_interval = 300  # 同步间隔（秒）
             self.sync_lock = threading.Lock()
             self.app = None
+            # 初始化日志记录器
+            self.logger = logging.getLogger('SyncManager')
+            self.logger.setLevel(logging.INFO)
+            if not self.logger.handlers:
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                handler.setFormatter(formatter)
+                self.logger.addHandler(handler)
     
     def start(self, app=None):
         """启动同步线程"""
@@ -54,7 +54,7 @@ class SyncManager:
             self.running = True
             self.sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
             self.sync_thread.start()
-            logger.info(f"同步调度器已启动，同步间隔: {self.sync_interval}秒")
+            self.logger.info(f"同步调度器已启动，同步间隔: {self.sync_interval}秒")
             return True
         return False
     
@@ -64,7 +64,7 @@ class SyncManager:
         if self.sync_thread and self.sync_thread.is_alive():
             self.sync_thread.join(timeout=1)
             self.sync_thread = None
-            logger.info("同步调度器已停止")
+            self.logger.info("同步调度器已停止")
             return True
         return False
     
@@ -88,9 +88,9 @@ class SyncManager:
                         with self.sync_lock:
                             self._sync_all()
                     else:
-                        logger.error("无法获取应用上下文，同步无法运行")
+                        self.logger.error("无法获取应用上下文，同步无法运行")
             except Exception as e:
-                logger.error(f"同步过程中出错: {str(e)}")
+                self.logger.error(f"同步过程中出错: {str(e)}")
             time.sleep(self.sync_interval)
     
     def _sync_all(self):
@@ -99,13 +99,13 @@ class SyncManager:
             # 获取Redis连接
             redis = redis_helper.get_client()
             if not redis:
-                logger.warning("无法获取Redis连接，等待重试...")
+                self.logger.warning("无法获取Redis连接，等待重试...")
                 return
 
             # 获取数据库会话
             session = get_db_session()
             if not session:
-                logger.warning("无法获取数据库会话，等待重试...")
+                self.logger.warning("无法获取数据库会话，等待重试...")
                 return
 
             try:
@@ -114,7 +114,7 @@ class SyncManager:
                 
                 # 获取同步锁
                 if not redis.set(SYNC_LOCK_KEY, "1", ex=600, nx=True):
-                    logger.info("另一个同步进程正在运行，跳过本次同步")
+                    self.logger.info("另一个同步进程正在运行，跳过本次同步")
                     return
                 
                 # 获取上次同步时间戳和本次同步时间戳
@@ -151,15 +151,15 @@ class SyncManager:
                     }
                     
                     # 同步用户数据
-                    logger.info("开始同步用户数据...")
+                    self.logger.info("开始同步用户数据...")
                     user_result = User.sync_to_postgres()
                     
                     # 同步令牌数据
-                    logger.info("开始同步令牌数据...")
+                    self.logger.info("开始同步令牌数据...")
                     token_result = Token.sync_to_postgres()
                     
                     # 同步任务数据
-                    logger.info("开始同步任务数据...")
+                    self.logger.info("开始同步任务数据...")
                     task_result = Task.sync_to_postgres()
                     
                     # 记录同步完成时间
@@ -173,21 +173,21 @@ class SyncManager:
                     # 更新上次同步时间戳
                     redis.set(last_sync_key, current_timestamp)
                     
-                    logger.info(f"所有数据同步完成，耗时: {sync_duration:.2f}秒")
+                    self.logger.info(f"所有数据同步完成，耗时: {sync_duration:.2f}秒")
                 finally:
                     # 释放同步锁
                     redis.delete(SYNC_LOCK_KEY)
                     redis.set(SYNC_STATUS_KEY, "completed", ex=600)
 
             except Exception as e:
-                logger.error(f"同步过程中出错: {str(e)}")
+                self.logger.error(f"同步过程中出错: {str(e)}")
                 redis.set(SYNC_STATUS_KEY, f"error: {str(e)}", ex=600)
                 session.rollback()
             finally:
                 close_db_session(session)
 
         except Exception as e:
-            logger.error(f"同步过程中出错: {str(e)}")
+            self.logger.error(f"同步过程中出错: {str(e)}")
             try:
                 redis = redis_helper.get_client()
                 if redis:
@@ -199,7 +199,7 @@ class SyncManager:
         """设置同步间隔"""
         if seconds > 0:
             self.sync_interval = seconds
-            logger.info(f"同步间隔已更新为: {seconds}秒")
+            self.logger.info(f"同步间隔已更新为: {seconds}秒")
             return True
         return False
     
@@ -217,9 +217,9 @@ class SyncManager:
                     'timestamp': time.time()
                 }
                 redis.rpush(queue_key, json.dumps(item))
-                logger.info(f"已添加到同步队列: {model_name} - {key}")
+                cls._instance.logger.info(f"已添加到同步队列: {model_name} - {key}")
         except Exception as e:
-            logger.error(f"添加到同步队列失败: {str(e)}")
+            cls._instance.logger.error(f"添加到同步队列失败: {str(e)}")
             
     @classmethod
     def get_sync_status(cls):
@@ -230,9 +230,8 @@ class SyncManager:
                 status = redis.get(SYNC_STATUS_KEY)
                 return status.decode('utf-8') if status else "unknown"
         except Exception as e:
-            logger.error(f"获取同步状态失败: {str(e)}")
+            cls._instance.logger.error(f"获取同步状态失败: {str(e)}")
             return "error"
-
 
 # 获取同步管理器实例
 def get_sync_manager():

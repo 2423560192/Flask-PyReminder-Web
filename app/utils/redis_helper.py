@@ -156,9 +156,19 @@ class RedisHelper:
         # 不在请求上下文中或无法访问g，返回独立客户端
         return self.get_standalone_client()
 
+    def close_pool(self):
+        """关闭Redis连接池"""
+        try:
+            if self.pool:
+                self.pool.disconnect()
+                self.pool = None
+                print("Redis连接池已关闭")
+        except Exception as e:
+            print(f"关闭Redis连接池时出错: {str(e)}")
+
     def close(self):
-        """清理Redis客户端连接"""
-        # 只在请求上下文中尝试关闭连接
+        """清理Redis客户端连接和连接池"""
+        # 关闭请求上下文中的客户端
         try:
             from flask import g, has_request_context
             if has_request_context() and hasattr(g, 'redis_client'):
@@ -175,7 +185,7 @@ class RedisHelper:
             # 其他错误
             print(f"关闭Redis连接时发生未预期的错误: {str(e)}")
             
-        # 尝试关闭独立客户端
+        # 关闭独立客户端
         try:
             if self._standalone_client:
                 self._standalone_client.close()
@@ -183,6 +193,9 @@ class RedisHelper:
         except Exception:
             # 忽略独立客户端关闭错误
             pass
+            
+        # 关闭连接池
+        self.close_pool()
 
     def check_connection(self):
         """检查Redis连接是否可用

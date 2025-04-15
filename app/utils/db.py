@@ -24,6 +24,9 @@ Base = declarative_base()
 db_available = False
 redis_available = False
 
+# 全局数据库会话变量
+db_session = None
+
 def register_engine_events(engine):
     """注册数据库引擎事件监听器"""
     def _engine_connect(conn, branch):
@@ -41,7 +44,7 @@ def register_engine_events(engine):
 
 def setup_database(app):
     """设置并初始化数据库连接"""
-    global db_available
+    global db_available, db_session
     db_available = False
     # 尝试连接数据库
     try:
