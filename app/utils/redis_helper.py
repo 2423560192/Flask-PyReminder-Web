@@ -31,24 +31,61 @@ class RedisHelper:
             
             print(f"正在初始化Redis连接池... URL配置: {bool(redis_url)}, 主机: {config.REDIS_HOST}, 端口: {config.REDIS_PORT}, SSL: {redis_ssl}")
             
+            # 检查Redis版本对SSL的支持
+            redis_version = getattr(redis, '__version__', '0.0.0')
+            supports_ssl = True
+            
+            try:
+                # 尝试导入Connection类来检查是否支持SSL
+                from redis.connection import Connection
+                # 检查Connection类的__init__方法是否接受ssl参数
+                import inspect
+                conn_params = inspect.signature(Connection.__init__).parameters
+                supports_ssl = 'ssl' in conn_params
+                print(f"Redis版本: {redis_version}, 支持SSL: {supports_ssl}")
+            except (ImportError, AttributeError):
+                # 如果导入失败，假设不支持SSL
+                supports_ssl = False
+                print(f"无法确定Redis客户端版本，假设不支持SSL")
+            
+            # 准备连接参数
+            connection_kwargs = {
+                'decode_responses': True
+            }
+            
+            # 仅当支持SSL且需要SSL时添加SSL参数
+            if supports_ssl and redis_ssl:
+                connection_kwargs.update({
+                    'ssl': True,
+                    'ssl_cert_reqs': None  # 不验证SSL证书
+                })
+            elif redis_ssl and not supports_ssl:
+                print("警告: Redis客户端不支持SSL，但配置要求SSL连接。连接可能会失败。")
+                
             if redis_url:
                 print(f"使用URL初始化Redis连接池: {redis_url[:20]}...")  # 只打印URL前20个字符，避免泄露密码
+                # 如果使用URL，我们需要更特殊的处理
+                if redis_ssl and not supports_ssl:
+                    # 对于旧版本，我们可能需要修改URL来添加rediss://前缀
+                    if redis_url.startswith('redis://'):
+                        redis_url = redis_url.replace('redis://', 'rediss://')
+                        print(f"已修改URL使用rediss://前缀支持SSL")
+                
                 self.pool = redis.ConnectionPool.from_url(
                     redis_url,
-                    decode_responses=True,
-                    ssl=redis_ssl,
-                    ssl_cert_reqs=None  # 不验证SSL证书
+                    **connection_kwargs
                 )
             else:
                 print(f"使用主机和端口初始化Redis连接池: {config.REDIS_HOST}:{config.REDIS_PORT}")
+                connection_kwargs.update({
+                    'host': config.REDIS_HOST,
+                    'port': config.REDIS_PORT,
+                    'db': config.REDIS_DB,
+                    'password': config.REDIS_PASSWORD
+                })
+                
                 self.pool = redis.ConnectionPool(
-                    host=config.REDIS_HOST,
-                    port=config.REDIS_PORT,
-                    db=config.REDIS_DB,
-                    password=config.REDIS_PASSWORD,
-                    decode_responses=True,
-                    ssl=redis_ssl,
-                    ssl_cert_reqs=None  # 不验证SSL证书
+                    **connection_kwargs
                 )
                 
             # 测试连接
